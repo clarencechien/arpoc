@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#0A0C0E" />
+    <meta
+      name="description"
+      content="WebXR AR 報時鐘：每到整點在你面前的地板上執行一次帶遙測 HUD 的發射序列。"
+    />
+    <title>ORBITAL HOUR — WebXR AR 發射報時鐘</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230A0C0E'/%3E%3Cpath d='M16 4c3 4 4 8 4 13v6h-8v-6c0-5 1-9 4-13z' fill='%23C6CCD4'/%3E%3Cpath d='M13 23h6l-3 6z' fill='%23FF7A18'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Saira+Condensed:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+
+    <!-- WebXR DOM Overlay 的根節點。AR 進行中只有這棵樹會疊在相機畫面上。 -->
+    <div id="overlay">
+      <!-- 啟動畫面 -->
+      <section id="start" class="screen">
+        <div class="start-inner">
+          <p class="eyebrow">WEBXR AUGMENTED REALITY</p>
+          <h1>ORBITAL<br /><span>HOUR</span></h1>
+          <p class="blurb">
+            把一座完整堆疊放在你面前的地板上。<br />
+            每到整點，它會執行一次帶遙測 HUD 的發射序列當作報時。
+          </p>
+
+          <div id="caps" class="caps" role="status">正在偵測裝置能力…</div>
+
+          <div class="actions">
+            <button id="enter-ar" class="btn primary" disabled>進入 AR</button>
+            <button id="enter-desktop" class="btn">桌面模式</button>
+          </div>
+
+          <label class="sound-opt">
+            <input type="checkbox" id="sound-toggle" checked />
+            <span>音效（點火低頻轟鳴與事件提示音，即時合成）</span>
+          </label>
+
+          <p class="legal">
+            非官方作品，與 SpaceX 無任何關聯。所有幾何均為程序化生成。
+            飛行時間軸取自 Starship Flight 6 公開資料。
+          </p>
+        </div>
+      </section>
+
+      <!-- AR / 桌面模式進行中的 UI -->
+      <section id="hud" class="screen hidden">
+        <div class="topbar">
+          <button id="exit" class="chip" title="離開">✕</button>
+          <div id="status" class="status">初始化…</div>
+          <button id="mute" class="chip" title="音效">♪</button>
+        </div>
+
+        <div class="bottombar">
+          <div id="dev" class="dev">
+            <div class="dev-row">
+              <button id="fire" class="btn small">手動發射</button>
+              <button id="abort" class="btn small ghost">中止</button>
+              <label class="dev-check">
+                <input type="checkbox" id="fast-clock" />
+                <span>每分鐘報時（測試）</span>
+              </label>
+            </div>
+            <div class="dev-row scrub-row">
+              <span class="dev-label">T</span>
+              <input id="scrub" type="range" min="0" max="1000" value="0" step="1" />
+              <span id="scrub-value" class="dev-value">T-00:00:10</span>
+            </div>
+          </div>
+          <button id="dev-toggle" class="chip wide">測試面板</button>
+        </div>
+      </section>
+    </div>
+
+    <noscript>
+      <p style="color: #f2f3f0; font-family: sans-serif; padding: 2rem">
+        這個應用需要 JavaScript 與 WebGL。
+      </p>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

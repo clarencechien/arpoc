@@ -1,0 +1,329 @@
+/*
+ * DOM 這一層只放控制項與狀態文字；遙測面板在 3D 空間裡（見 hud/panel.ts）。
+ * AR 模式下這棵樹是 WebXR DOM Overlay 的內容，會疊在相機畫面上，
+ * 所以所有文字都要有自帶對比的底板，不能只靠顏色。
+ */
+
+:root {
+  --ink: #f2f3f0;
+  --void: #0a0c0e;
+  --plume: #ff7a18;
+  --cryo: #7fd4ff;
+  --dim: #5a6169;
+
+  --font-tele: 'Saira Condensed', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --font-label: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--void);
+  color: var(--ink);
+  font-family: var(--font-label);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 等寬數字：倒數每一格才不會左右抖 */
+body {
+  font-variant-numeric: tabular-nums;
+}
+
+#gl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── 啟動畫面 ─────────────────────────────────────────── */
+
+#start {
+  pointer-events: auto;
+  justify-content: center;
+  padding: max(6vh, 2rem) 1.5rem calc(2rem + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(120% 80% at 50% 0%, #14181d 0%, #0a0c0e 55%, #06080a 100%);
+  overflow-y: auto;
+}
+
+.start-inner {
+  max-width: 30rem;
+  margin: auto;
+  width: 100%;
+}
+
+.eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.34em;
+  color: var(--cryo);
+  margin: 0 0 1.1rem;
+}
+
+h1 {
+  font-family: var(--font-tele);
+  font-weight: 700;
+  font-size: clamp(3.2rem, 17vw, 6rem);
+  line-height: 0.86;
+  letter-spacing: 0.01em;
+  margin: 0 0 1.4rem;
+  text-transform: uppercase;
+}
+
+h1 span {
+  color: var(--dim);
+}
+
+.blurb {
+  font-size: 0.85rem;
+  line-height: 1.75;
+  color: #b8bfc7;
+  margin: 0 0 1.6rem;
+}
+
+.caps {
+  font-size: 0.72rem;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  border-left: 2px solid var(--dim);
+  padding: 0.55rem 0 0.55rem 0.8rem;
+  color: #97a0a9;
+  margin-bottom: 1.6rem;
+  white-space: pre-line;
+}
+
+.caps[data-state='ok'] {
+  border-color: var(--cryo);
+  color: var(--cryo);
+}
+
+.caps[data-state='warn'] {
+  border-color: var(--plume);
+  color: #f0b483;
+}
+
+.actions {
+  display: flex;
+  gap: 0.7rem;
+  margin-bottom: 1.4rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(242, 243, 240, 0.06);
+  border: 1px solid rgba(242, 243, 240, 0.25);
+  border-radius: 3px;
+  padding: 0.95rem 1.4rem;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-height: 48px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.btn:active {
+  background: rgba(242, 243, 240, 0.16);
+}
+
+.btn.primary {
+  border-color: var(--cryo);
+  color: var(--void);
+  background: var(--cryo);
+  font-weight: 600;
+}
+
+.btn.primary:disabled {
+  background: transparent;
+  color: var(--dim);
+  border-color: rgba(90, 97, 105, 0.5);
+  cursor: not-allowed;
+}
+
+.btn.small {
+  font-size: 0.68rem;
+  padding: 0.6rem 0.9rem;
+  min-height: 40px;
+  flex: 0 1 auto;
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: rgba(242, 243, 240, 0.16);
+  color: #9aa2ab;
+}
+
+.sound-opt,
+.dev-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.7rem;
+  color: #97a0a9;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.sound-opt input,
+.dev-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--cryo);
+  flex: none;
+}
+
+.legal {
+  margin: 1.8rem 0 0;
+  font-size: 0.62rem;
+  line-height: 1.7;
+  color: #5a6169;
+}
+
+/* ── 進行中的 UI ──────────────────────────────────────── */
+
+#hud {
+  justify-content: space-between;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 0;
+}
+
+.bottombar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+.chip {
+  pointer-events: auto;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 0.7rem;
+  color: var(--ink);
+  background: rgba(10, 12, 14, 0.72);
+  border: 1px solid rgba(242, 243, 240, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.chip.wide {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+}
+
+.chip[data-off='true'] {
+  color: var(--dim);
+}
+
+/* status 是唯一會出現在任意背景前的長文字，scrim 要夠厚 */
+.status {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  padding: 0.5rem 0.8rem;
+  color: var(--ink);
+  background: rgba(10, 12, 14, 0.72);
+  border-left: 2px solid var(--cryo);
+  backdrop-filter: blur(6px);
+}
+
+.status[data-state='burn'] {
+  border-left-color: var(--plume);
+}
+
+.dev {
+  pointer-events: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  background: rgba(10, 12, 14, 0.82);
+  border: 1px solid rgba(242, 243, 240, 0.14);
+  border-radius: 3px;
+  backdrop-filter: blur(6px);
+}
+
+.dev-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.scrub-row {
+  flex-wrap: nowrap;
+}
+
+.dev-label {
+  font-size: 0.7rem;
+  color: var(--dim);
+  letter-spacing: 0.2em;
+}
+
+.dev-value {
+  font-family: var(--font-tele);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 7.2ch;
+  text-align: right;
+}
+
+#scrub {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--plume);
+  height: 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .chip {
+    transition: none;
+  }
+}
