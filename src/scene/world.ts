@@ -7,6 +7,7 @@
 
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { XREstimatedLight } from 'three/examples/jsm/webxr/XREstimatedLight.js'
 import { buildRocket } from './rocket'
 import { buildPad } from './pad'
 import { makeDustRing, makePlume, makeSparks } from './effects'
@@ -42,19 +43,22 @@ export interface World {
   setStandbyGlow(on: boolean): void
   reset(): void
   setEnvironment(renderer: THREE.WebGLRenderer): void
+  /** 必須在任何 XR session 開始之前呼叫；裝置支援的話改用現場光照 */
+  enableLightEstimation(renderer: THREE.WebGLRenderer): void
 }
 
 export function createWorld(): World {
   const scene = new THREE.Scene()
 
+  // 棚拍光。AR 模式下如果裝置支援 light-estimation，這一組會被現場光照取代。
+  const studioLights = new THREE.Group()
   const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x2a2f36, 1.6)
-  scene.add(hemi)
   const key = new THREE.DirectionalLight(0xffffff, 2.2)
   key.position.set(1.2, 2.4, 1.0)
-  scene.add(key)
   const fill = new THREE.DirectionalLight(0x9fb4cc, 0.7)
   fill.position.set(-1.5, 0.8, -1.2)
-  scene.add(fill)
+  studioLights.add(hemi, key, fill)
+  scene.add(studioLights)
 
   const anchor = new THREE.Group()
   anchor.name = 'launchSite'
@@ -63,11 +67,11 @@ export function createWorld(): World {
 
   anchor.add(buildPad())
 
-  const { booster, ship, hotStageRing, shipMaterials } = buildRocket()
+  const { booster, ship, shipMaterials } = buildRocket()
   const padDeckY = BODY_RADIUS * 1.775 // 發射台桌面高度，火箭站在上面
   const stack = new THREE.Group()
   stack.position.y = padDeckY
-  stack.add(booster, ship, hotStageRing)
+  stack.add(booster, ship)
   anchor.add(stack)
 
   // 接觸陰影：比 shadow map 便宜得多，AR 裡的作用就是把物件「黏」在地板上
@@ -118,7 +122,10 @@ export function createWorld(): World {
   reticle.visible = false
   scene.add(reticle)
 
-  const lamps = anchor.children.filter((c) => c.name === 'padLamp')
+  const lamps: THREE.Mesh[] = []
+  anchor.traverse((o) => {
+    if (o.name === 'padLamp') lamps.push(o as THREE.Mesh)
+  })
   const sparkOrigin = new THREE.Vector3()
 
   function applyFlight(f: FlightState, dt: number, elapsed: number): void {
@@ -138,10 +145,6 @@ export function createWorld(): World {
         mm.transparent = false
       }
     }
-
-    hotStageRing.position.set(0, f.hotStageRing.y, f.hotStageRing.z)
-    hotStageRing.rotation.x = f.hotStageRing.attached ? f.booster.pitch : f.hotStageRing.spin
-    hotStageRing.visible = f.hotStageRing.opacity > 0.02
 
     boosterPlume.setIntensity(f.boosterPlume)
     shipPlume.setIntensity(f.shipPlume)
@@ -165,8 +168,9 @@ export function createWorld(): World {
     ;(shadow.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - lift) + 0.05
 
     for (const l of lamps) {
-      const mat = (l as THREE.Mesh).material as THREE.MeshBasicMaterial
-      mat.color.setHex(f.engines.burning ? HEX.plume : HEX.cryo)
+      ;(l.material as THREE.MeshBasicMaterial).color.setHex(
+        f.engines.burning ? HEX.plume : HEX.cryo,
+      )
     }
   }
 
@@ -181,8 +185,7 @@ export function createWorld(): World {
     facePanel: (c) => panel.face(c),
     setStandbyGlow(on: boolean) {
       for (const l of lamps) {
-        const mat = (l as THREE.Mesh).material as THREE.MeshBasicMaterial
-        mat.color.setHex(on ? HEX.cryo : HEX.dim)
+        ;(l.material as THREE.MeshBasicMaterial).color.setHex(on ? HEX.cryo : HEX.dim)
       }
     },
     reset() {
@@ -192,7 +195,6 @@ export function createWorld(): World {
       ship.position.set(0, BOOSTER_HEIGHT, 0)
       ship.rotation.set(0, 0, 0)
       ship.scale.setScalar(1)
-      hotStageRing.visible = true
       boosterPlume.setIntensity(0)
       shipPlume.setIntensity(0)
       landingPlume.setIntensity(0)
@@ -202,6 +204,44 @@ export function createWorld(): World {
         mm.opacity = 1
         mm.transparent = false
       }
+    },
+    /**
+     * WebXR light estimation。
+     *
+     * AR 裡最容易「看起來是貼上去的」的原因不是模型不夠細，是光對不上：
+     * 房間是暖色頂光，物件卻頂著一組棚拍白光。裝置支援的話直接換成
+     * 現場估計出來的方向光 + 反射環境貼圖，不鏽鋼會反射真實房間。
+     * 不支援就維持棚拍光，不影響其他功能。
+     */
+    enableLightEstimation(renderer: THREE.WebGLRenderer) {
+      // three 的 XREstimatedLight 內部沒有對 requestLightProbe() 掛 catch。
+      // 裝置沒授予 light-estimation 時它會 reject，功能上無害但會噴一則
+      // unhandled rejection，這裡精準地吞掉那一種。
+      window.addEventListener('unhandledrejection', (e) => {
+        const reason = e.reason as { name?: string } | undefined
+        if (reason?.name === 'NotSupportedError') e.preventDefault()
+      })
+
+      const xrLight = new XREstimatedLight(renderer, true)
+      let studioEnv: THREE.Texture | null = null
+      xrLight.addEventListener('estimationstart', () => {
+        scene.add(xrLight)
+        studioLights.visible = false
+        if (xrLight.environment) {
+          studioEnv = scene.environment
+          scene.environment = xrLight.environment
+          scene.environmentIntensity = 1
+        }
+      })
+      xrLight.addEventListener('estimationend', () => {
+        scene.remove(xrLight)
+        studioLights.visible = true
+        if (studioEnv) {
+          scene.environment = studioEnv
+          scene.environmentIntensity = 0.55
+          studioEnv = null
+        }
+      })
     },
     setEnvironment(renderer: THREE.WebGLRenderer) {
       // 不鏽鋼要有東西可以反射，否則 metalness 0.9 會變成一片死黑

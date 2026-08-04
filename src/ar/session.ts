@@ -68,7 +68,7 @@ export class ArSession {
 
     const session = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test', 'local'],
-      optionalFeatures: ['dom-overlay', 'local-floor'],
+      optionalFeatures: ['dom-overlay', 'local-floor', 'light-estimation'],
       domOverlay: { root: domOverlayRoot },
     })
     this.session = session

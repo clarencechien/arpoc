@@ -4,7 +4,8 @@
 每到整點就執行一次帶遙測 HUD 的發射序列當作報時。
 
 > 非官方作品，與 SpaceX 沒有任何關聯。所有幾何都是程序化生成的，
-> 沒有使用任何第三方模型。詳見 [`CREDITS.md`](./CREDITS.md)。
+> 沒有使用任何第三方模型。載具依 **Starship V3（Block 3）** 建模。
+> 詳見 [`CREDITS.md`](./CREDITS.md)。
 
 ---
 
@@ -42,7 +43,8 @@ WebXR **只在 secure context 下啟動**。用區網 IP 開 `http://192.168.x.x
 ```bash
 npm run build && npm run preview &
 npm run smoke                          # 跑完整條時間軸並逐段截圖到 smoke-out/
-node scripts/reduced-motion-check.mjs
+node scripts/reduced-motion-check.mjs  # 驗 prefers-reduced-motion 不播飛行動畫
+node scripts/inspect.mjs               # 拉近繞一圈，看模型輪廓與材質
 ```
 
 需要 Playwright 的 chromium（`npx playwright install chromium`），
@@ -76,12 +78,13 @@ src/
     flight.ts      任務時間 → 場景姿態（含視覺高度壓縮）
     scheduler.ts   整點排程（自我校正迴圈 + 遲到策略）
   scene/
-    rocket.ts      程序化 Starship / Super Heavy
+    rocket.ts      程序化 Starship V3 / Super Heavy V3
+    materials.ts   程序化貼圖（焊縫、板材、六角隔熱瓦）
     pad.ts         發射台與塔架
     effects.ts     尾焰 shader、塵埃環、火花粒子池
     world.ts       場景組裝與每幀套用
   hud/panel.ts     3D billboard 遙測面板（canvas texture）
-  ar/session.ts    WebXR session、hit-test、wake lock、能力偵測
+  ar/session.ts    WebXR session、hit-test、wake lock、light estimation、能力偵測
   audio/audio.ts   Web Audio 合成
   app.ts           狀態機、播放控制、輸入
   main.ts          DOM 接線
@@ -103,6 +106,17 @@ anchor 是不是被 hit-test 放到地板上。
 canvas 2D 沒有 `font-variant-numeric`，所以 `hud/panel.ts` 的 `drawTabular()`
 把每個字元畫進以 `'0'` 寬度為準的固定格子裡，不依賴字體自帶 tabular figures。
 
+**表面細節靠貼圖，不靠面數。**
+`scene/materials.ts` 在啟動時畫幾張 canvas，轉成 normal / roughness map：
+環焊縫、桶段接縫、板材起伏、六角隔熱瓦都在貼圖裡。
+一根沒有貼圖的圓柱在任何角度都只有一條漸層，大腦立刻認出那是原始幾何——
+「看起來假」多半是這個原因，不是輪廓不夠細。面數留給輪廓。
+
+**AR 模式會用現場光照。**
+裝置支援 `light-estimation` 時，棚拍光整組換成 WebXR 估計出的方向光與
+反射環境貼圖，不鏽鋼會反射真實房間。AR 裡最容易「看起來是貼上去的」
+原因不是模型不夠細，是光對不上。不支援就沿用棚拍光。
+
 **視覺高度是壓縮過的。**
 真實 152 km 換算 1:200 也有 760 公尺。`flight.ts` 用一條飽和曲線把它壓進
 1.25 公尺的錐形範圍，再靠縮小與淡出暗示距離。
@@ -122,7 +136,7 @@ window 的 `rAF` 在背景分頁會停掉。
 
 ## 與 handoff 規格的差異
 
-三處，都是規格本身有矛盾或不足：
+四處，都是規格本身有矛盾或不足：
 
 1. **總長約 52 秒，不是 45 秒。**
    handoff §5 的速率表本身就要 80 秒實時（`T-10 → T+70` 全段 1.0×），
@@ -138,6 +152,15 @@ window 的 `rAF` 在背景分頁會停掉。
 
 3. **遙測面板顯示的是 Ship 的數值，包含 Booster 返場那一段。**
    跟真實轉播的主讀數一致；Booster 的狀態由畫面本身表達。
+
+4. **載具是 V3，時間軸是 Flight 6（V1）。**
+   handoff 指定 Flight 6 的時間軸為基準真實值，但要求「像最新的 Starship」的
+   是模型。兩者版本不同，所以：
+   - **沒有 `HOT-STAGE JETTISON` 事件。** V3 的熱分離段整合在 Booster 上，
+     不再拋離；照 Flight 6 播就會出現一個這輛載具不會做的動作
+   - **33 具引擎的點亮波只走 0.7 秒。** V3 改了燃料輸送管之後是同時點火的，
+     不再分批。環形圖的識別性保留，但不誤導成分批點火
+   - 其餘事件時間仍照 Flight 6
 
 ## 驗收清單
 
