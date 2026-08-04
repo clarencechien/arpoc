@@ -1,18 +1,27 @@
 /**
- * 程序化 Starship 幾何（handoff §4）。
+ * 程序化 Starship V3（Block 3）幾何。
  *
- * 刻意不依賴任何第三方 GLB：Starship 的外形就是圓柱 + 鼻錐 + 襟翼，
- * 在 60 cm 的 AR 尺度下,程序化幾何與減面過的掃描模型看不出差別，
- * 而且完全沒有授權風險。要換 GLB 時，只要讓載入結果維持
- * 「booster 與 ship 各自為獨立 Group、原點在底部中心」即可。
+ * 版本依據：Flight 12 / 13 飛的載具。與 V1/V2 的差別是這個檔案的主要形狀來源：
+ *  - 熱分離環**整合在 Booster 上，不再拋離**
+ *  - 格柵翼由 4 片改為 3 片，T 字配置、放大約 50%；
+ *    對向兩片帶接塔吊點，第三片是方向舵
+ *  - Ship 的前襟翼移到更偏背風面、位置更前、尺寸縮小
+ *  - 全長 124.4 m
+ *
+ * 刻意不依賴任何第三方 GLB：形狀來自參數，表面細節來自 materials.ts 生成的
+ * normal / roughness map。焊縫與六角瓦是貼圖不是幾何——面數花在輪廓上，
+ * 那才是「看起來像不像」的來源。
+ *
+ * 要換成 GLB 時只需維持：booster 與 ship 各自為獨立 Group、Y 軸向上、
+ * 原點在各自底部中心。
  */
 
 import * as THREE from 'three'
-import { HEX } from '../theme'
+import { steelMaterial, structureMaterial, tileMaterial } from './materials'
 import { BODY_RADIUS, BOOSTER_HEIGHT, SHIP_HEIGHT } from '../sim/flight'
 
 const R = BODY_RADIUS
-const RADIAL = 24
+const RADIAL = 32
 
 /** 33 具 Raptor 的實際排列：中央 3 / 中環 10 / 外環 20。 */
 export const BOOSTER_ENGINE_RINGS = [
@@ -21,144 +30,307 @@ export const BOOSTER_ENGINE_RINGS = [
   { count: 20, radius: 0.82 },
 ] as const
 
-/** Ship 的六具：3 具海平面 + 3 具真空（真空的較大、在外圈）。 */
+/** Ship 的六具：3 具海平面（內）+ 3 具真空（外，噴嘴大得多）。 */
 export const SHIP_ENGINE_RINGS = [
-  { count: 3, radius: 0.22 },
-  { count: 3, radius: 0.62 },
+  { count: 3, radius: 0.24 },
+  { count: 3, radius: 0.6 },
 ] as const
 
-function steel(color: number = HEX.steel, roughness = 0.35): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, metalness: 0.9, roughness })
-}
-
-/** 依環形佈局產生引擎噴嘴位置（單位：本體半徑的比例）。 */
-export function engineOffsets(
-  rings: readonly { count: number; radius: number }[],
-): THREE.Vector2[] {
-  const out: THREE.Vector2[] = []
-  for (const ring of rings) {
-    for (let i = 0; i < ring.count; i++) {
-      const a = (i / ring.count) * Math.PI * 2 - Math.PI / 2
-      out.push(new THREE.Vector2(Math.cos(a) * ring.radius, Math.sin(a) * ring.radius))
-    }
-  }
-  return out
-}
+/**
+ * 迎風面（隔熱瓦）的方位。
+ * 不讓它正對預設鏡頭——正對的話整艘船都是黑的，看不出 Starship
+ * 「銀色箭體 + 黑色腹面」的識別性。偏開約 106°，側面剛好看得到分界。
+ */
+const WINDWARD_CENTER = 1.85
+/** 單邊弧度；總覆蓋約 117°，與真實隔熱瓦的包覆範圍相當 */
+const WINDWARD_HALF = 1.02
 
 export interface RocketParts {
   booster: THREE.Group
   ship: THREE.Group
-  hotStageRing: THREE.Group
   /** Ship 上的所有材質，供淡出時統一調 opacity */
   shipMaterials: THREE.Material[]
 }
 
-function makeGridFin(): THREE.Mesh {
-  const g = new THREE.BoxGeometry(R * 1.5, R * 0.9, R * 0.12)
-  return new THREE.Mesh(g, steel(0x9aa2ac, 0.55))
+// ── 共用零件 ─────────────────────────────────────────────
+
+/** 沿著箭體外側的縱向線路管（raceway）。真實載具上很顯眼的一條。 */
+function raceway(y0: number, y1: number, azimuth: number, radius = R): THREE.Mesh {
+  const len = y1 - y0
+  const geo = new THREE.CylinderGeometry(R * 0.09, R * 0.09, len, 8, 1, false, 0, Math.PI)
+  geo.rotateY(Math.PI / 2)
+  const mesh = new THREE.Mesh(geo, structureMaterial(0x9aa1a9, 0.5))
+  mesh.position.set(Math.sin(azimuth) * radius, y0 + len / 2, Math.cos(azimuth) * radius)
+  mesh.rotation.y = azimuth
+  return mesh
 }
 
-function makeFlap(width: number, height: number): THREE.Mesh {
-  const shape = new THREE.Shape()
-  shape.moveTo(0, 0)
-  shape.lineTo(width, height * 0.18)
-  shape.lineTo(width * 0.94, height)
-  shape.lineTo(0, height * 0.88)
-  shape.closePath()
-  const g = new THREE.ExtrudeGeometry(shape, { depth: R * 0.16, bevelEnabled: false })
-  g.center()
-  return new THREE.Mesh(g, steel(0xb9c0c9, 0.42))
+interface EngineRing {
+  count: number
+  radius: number
 }
 
+/**
+ * 引擎噴嘴。每一環可以有自己的噴嘴尺寸——Ship 的真空版本大得多，
+ * 用同一個尺寸畫會完全看不出那是 RVac。
+ */
 function makeEngines(
-  rings: readonly { count: number; radius: number }[],
-  bellRadius: number,
-  bellLength: number,
+  rings: readonly EngineRing[],
+  bells: readonly { radius: number; length: number }[],
 ): THREE.Group {
   const group = new THREE.Group()
-  const mat = steel(0x6f7681, 0.5)
-  const geo = new THREE.CylinderGeometry(bellRadius, bellRadius * 0.55, bellLength, 10, 1, true)
-  const offsets = engineOffsets(rings)
-  const mesh = new THREE.InstancedMesh(geo, mat, offsets.length)
-  const m = new THREE.Matrix4()
-  offsets.forEach((o, i) => {
-    m.makeTranslation(o.x * R, -bellLength / 2, o.y * R)
-    mesh.setMatrixAt(i, m)
+  const mat = structureMaterial(0x4e545c, 0.45)
+  const throat = structureMaterial(0x14161a, 0.9)
+
+  rings.forEach((ring, ri) => {
+    const bell = bells[Math.min(ri, bells.length - 1)]
+    const geo = new THREE.CylinderGeometry(bell.radius, bell.radius * 0.42, bell.length, 12, 1, true)
+    const mesh = new THREE.InstancedMesh(geo, mat, ring.count)
+    // 噴嘴口的暗色圓盤，否則從下面看會直接穿透
+    const capGeo = new THREE.CircleGeometry(bell.radius * 0.99, 12)
+    capGeo.rotateX(Math.PI / 2)
+    const caps = new THREE.InstancedMesh(capGeo, throat, ring.count)
+
+    const m = new THREE.Matrix4()
+    for (let i = 0; i < ring.count; i++) {
+      const a = (i / ring.count) * Math.PI * 2 - Math.PI / 2
+      const x = Math.cos(a) * ring.radius * R
+      const z = Math.sin(a) * ring.radius * R
+      m.makeTranslation(x, -bell.length / 2, z)
+      mesh.setMatrixAt(i, m)
+      m.makeTranslation(x, -bell.length + 0.0004, z)
+      caps.setMatrixAt(i, m)
+    }
+    mesh.instanceMatrix.needsUpdate = true
+    caps.instanceMatrix.needsUpdate = true
+    mesh.frustumCulled = false
+    caps.frustumCulled = false
+    group.add(mesh, caps)
   })
-  mesh.instanceMatrix.needsUpdate = true
-  mesh.frustumCulled = false
-  group.add(mesh)
+
   return group
 }
 
-/** 在圓柱側面加幾道環焊縫，讓不鏽鋼有尺度感。 */
-function addWelds(parent: THREE.Group, height: number, count: number, radius = R): void {
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x8f979f,
-    metalness: 0.9,
-    roughness: 0.6,
-  })
-  const geo = new THREE.TorusGeometry(radius * 1.004, radius * 0.012, 4, RADIAL)
-  const mesh = new THREE.InstancedMesh(geo, mat, count)
-  const m = new THREE.Matrix4()
-  const rot = new THREE.Matrix4().makeRotationX(Math.PI / 2)
-  for (let i = 0; i < count; i++) {
-    const y = ((i + 1) / (count + 1)) * height
-    m.copy(rot).setPosition(0, y, 0)
-    mesh.setMatrixAt(i, m)
-  }
-  mesh.instanceMatrix.needsUpdate = true
-  mesh.frustumCulled = false
-  parent.add(mesh)
+/** 引擎艙頂板，擋住從側面看進箭體內部的視線。 */
+function bayPlate(radius: number, y: number): THREE.Mesh {
+  const geo = new THREE.CircleGeometry(radius, RADIAL)
+  geo.rotateX(Math.PI / 2)
+  const mesh = new THREE.Mesh(geo, structureMaterial(0x1c1f23, 0.95))
+  mesh.position.y = y
+  return mesh
 }
 
-function buildBooster(): { group: THREE.Group; ring: THREE.Group } {
+// ── Super Heavy V3 ───────────────────────────────────────
+
+/**
+ * V3 格柵翼：3 片、T 字配置、比 Block 1/2 大 50%。
+ * 用真的格子（縱橫薄板）而不是一塊實心方塊——這是遠看就分得出真假的地方。
+ */
+function makeGridFin(width: number, height: number, chord: number): THREE.Group {
+  const fin = new THREE.Group()
+  const mat = structureMaterial(0x8c939b, 0.62)
+  // 格板厚度要撐得住 60 cm 尺度下的取樣，太薄會糊成一塊實心方塊
+  const wall = R * 0.075
+
+  const cellsX = 4
+  const cellsZ = 2
+
+  // 縱向隔板（沿 x 分格）。用同一塊 BoxGeometry 壓扁成薄板，省一組頂點。
+  const xPlateGeo = new THREE.BoxGeometry(width, height, chord)
+  const xPlates = new THREE.InstancedMesh(xPlateGeo, mat, cellsX + 1)
+  for (let i = 0; i <= cellsX; i++) {
+    const x = -width / 2 + (i / cellsX) * width
+    const m = new THREE.Matrix4().makeScale(wall / width, 1, 1)
+    m.setPosition(x, 0, 0)
+    xPlates.setMatrixAt(i, m)
+  }
+  xPlates.instanceMatrix.needsUpdate = true
+
+  // 徑向隔板（沿 z 分格）
+  const zPlateGeo = new THREE.BoxGeometry(width, height, chord)
+  const zPlates = new THREE.InstancedMesh(zPlateGeo, mat, cellsZ + 1)
+  for (let i = 0; i <= cellsZ; i++) {
+    const z = -chord / 2 + (i / cellsZ) * chord
+    const m = new THREE.Matrix4().makeScale(1, 1, wall / chord)
+    m.setPosition(0, 0, z)
+    zPlates.setMatrixAt(i, m)
+  }
+  zPlates.instanceMatrix.needsUpdate = true
+
+  // 外框比格子厚，撐出輪廓
+  const frame = new THREE.Group()
+  for (const [sx, sy] of [
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(width * 1.04, height * 0.09, chord * 1.02), mat)
+    bar.position.set(sx, (sy * height) / 2, 0)
+    frame.add(bar)
+  }
+  for (const sx of [-1, 1]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(width * 0.05, height * 1.02, chord * 1.02), mat)
+    bar.position.set((sx * width) / 2, 0, 0)
+    frame.add(bar)
+  }
+
+  fin.add(xPlates, zPlates, frame)
+  return fin
+}
+
+function buildBooster(): THREE.Group {
   const group = new THREE.Group()
   group.name = 'booster'
 
-  const bodyH = BOOSTER_HEIGHT * 0.94
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, bodyH, RADIAL, 1), steel())
-  body.position.y = bodyH / 2
-  group.add(body)
-  addWelds(group, bodyH, 9)
+  const H = BOOSTER_HEIGHT
+  const skirtH = H * 0.055
+  // 熱分離段是箭體的一部分，不再是可拋離的環
+  const hotStageH = H * 0.062
+  const barrelY0 = skirtH
+  const barrelY1 = H - hotStageH
+  const barrelH = barrelY1 - barrelY0
 
-  // 引擎裙（略收）
+  // 引擎裙：外徑略大、顏色略深，是箭體最下面那一圈
   const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(R, R * 0.97, BOOSTER_HEIGHT * 0.08, RADIAL, 1),
-    steel(0x9aa2ac, 0.5),
+    new THREE.CylinderGeometry(R * 1.008, R * 1.012, skirtH, RADIAL, 1),
+    steelMaterial({ color: 0x9198a0, repeat: [2, 0.35], normalScale: 0.8 }),
   )
-  skirt.position.y = BOOSTER_HEIGHT * 0.04
+  skirt.position.y = skirtH / 2
   group.add(skirt)
+  group.add(bayPlate(R * 0.99, skirtH * 0.35))
 
-  const engines = makeEngines(BOOSTER_ENGINE_RINGS, R * 0.075, R * 0.5)
-  engines.position.y = 0
-  group.add(engines)
+  // 主箭體
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1),
+    steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.35] }),
+  )
+  barrel.position.y = barrelY0 + barrelH / 2
+  group.add(barrel)
 
-  // 四片格柵翼，靠近頂端
-  for (let i = 0; i < 4; i++) {
-    const fin = makeGridFin()
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4
-    fin.position.set(Math.cos(a) * R * 1.5, bodyH * 0.9, Math.sin(a) * R * 1.5)
-    fin.rotation.y = -a
+  // 熱分離段：略微外擴的短段 + 一圈排氣開口。V3 起這一段不拋離。
+  const hotStage = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 1.015, R * 1.0, hotStageH, RADIAL, 1, true),
+    steelMaterial({ color: 0x8f959d, repeat: [2, 0.3], roughnessScale: 1.25 }),
+  )
+  hotStage.position.y = barrelY1 + hotStageH / 2
+  group.add(hotStage)
+
+  const ventGeo = new THREE.BoxGeometry(R * 0.16, hotStageH * 0.52, R * 0.05)
+  const vents = new THREE.InstancedMesh(ventGeo, structureMaterial(0x0e1013, 0.95), 18)
+  {
+    const m = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const s = new THREE.Vector3(1, 1, 1)
+    const up = new THREE.Vector3(0, 1, 0)
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2
+      q.setFromAxisAngle(up, a)
+      m.compose(
+        new THREE.Vector3(
+          Math.sin(a) * R * 1.005,
+          barrelY1 + hotStageH * 0.5,
+          Math.cos(a) * R * 1.005,
+        ),
+        q,
+        s,
+      )
+      vents.setMatrixAt(i, m)
+    }
+    vents.instanceMatrix.needsUpdate = true
+  }
+  group.add(vents)
+
+  // 頂端封板，避免從上方看穿
+  group.add(bayPlate(R * 0.99, H - 0.0006))
+
+  // 3 片格柵翼，T 字配置：對向兩片帶吊點，第三片作方向舵
+  // 翼的局部座標：X＝切線向（翼展）、Y＝箭體軸向（格子開口方向）、Z＝徑向朝外（弦長）
+  const finW = R * 1.5
+  const finH = H * 0.05
+  const finC = R * 0.85
+  const finY = barrelY1 - H * 0.058
+  for (const a of [0, Math.PI, Math.PI / 2]) {
+    const fin = makeGridFin(finW, finH, finC)
+    fin.position.set(Math.sin(a) * (R + finC * 0.52), finY, Math.cos(a) * (R + finC * 0.52))
+    fin.rotation.y = a
     group.add(fin)
+
+    // 根部整流罩：貼著箭體的薄殼，不是一顆方塊
+    const root = new THREE.Mesh(
+      new THREE.BoxGeometry(R * 0.62, finH * 1.5, R * 0.22),
+      structureMaterial(0x9aa1a9, 0.55),
+    )
+    root.position.set(Math.sin(a) * R * 1.05, finY, Math.cos(a) * R * 1.05)
+    root.rotation.y = a
+    group.add(root)
   }
 
-  // 熱分離環：獨立 Group，T+220 會被拋離
-  const ring = new THREE.Group()
-  ring.name = 'hotStageRing'
-  const ringMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(R, R, BOOSTER_HEIGHT * 0.055, RADIAL, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0x7e858e,
-      metalness: 0.85,
-      roughness: 0.55,
-      side: THREE.DoubleSide,
-    }),
-  )
-  ringMesh.position.y = BOOSTER_HEIGHT * 0.0275
-  ring.add(ringMesh)
+  // 接塔吊點：只在對向那兩片翼的下方
+  for (const a of [0, Math.PI]) {
+    const pin = new THREE.Mesh(
+      new THREE.CylinderGeometry(R * 0.075, R * 0.075, R * 0.36, 10),
+      structureMaterial(0xb6bcc4, 0.4),
+    )
+    pin.rotation.z = Math.PI / 2
+    pin.position.set(Math.sin(a) * R * 1.06, finY - finH * 1.5, Math.cos(a) * R * 1.06)
+    pin.rotation.y = a
+    group.add(pin)
+  }
 
-  return { group, ring }
+  group.add(raceway(skirtH, barrelY1 - H * 0.02, Math.PI * 1.35))
+
+  return group
+}
+
+// ── Ship V3 ──────────────────────────────────────────────
+
+/** 鼻錐外形：底部與圓柱相切（有肩線），頂端收成圓頭。 */
+function noseProfile(baseY: number, height: number, radius: number, steps: number): THREE.Vector2[] {
+  const pts: THREE.Vector2[] = []
+  // 真實鼻錐的頭部是圓的（曲率半徑約 0.6 m），不是尖的
+  const tipR = radius * 0.13
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const r = radius * Math.pow(1 - Math.pow(t, 2.6), 0.55)
+    pts.push(new THREE.Vector2(Math.max(r, tipR), baseY + height * t))
+  }
+  // 半球頂，收在 ogive 收斂到的同一個半徑上，不會出現尖刺
+  for (let i = 1; i <= 4; i++) {
+    const k = (i / 4) * (Math.PI / 2)
+    pts.push(new THREE.Vector2(tipR * Math.cos(k), baseY + height + tipR * Math.sin(k)))
+  }
+  return pts
+}
+
+/** 襟翼：後掠前緣 + 略帶錐度的梯形，接一段鉸鏈整流罩。 */
+function makeFlap(
+  span: number,
+  root: number,
+  tip: number,
+  material: THREE.Material,
+): THREE.Group {
+  const shape = new THREE.Shape()
+  shape.moveTo(0, -root / 2)
+  shape.lineTo(span, -tip / 2 - span * 0.12)
+  shape.lineTo(span, tip / 2 - span * 0.12)
+  shape.lineTo(0, root / 2)
+  shape.closePath()
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: R * 0.16, bevelEnabled: false })
+  // shape 的 x＝翼展、y＝弦長、擠出方向＝厚度。
+  // 繞 Y 轉 -90° 之後：翼展→+Z（徑向朝外）、弦長→Y（箭體軸向）、厚度→X（切線向）。
+  geo.rotateY(-Math.PI / 2)
+  geo.translate(0, 0, R * 0.08)
+
+  const group = new THREE.Group()
+  group.add(new THREE.Mesh(geo, material))
+
+  // 鉸鏈軸是切線向的
+  const hinge = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 0.1, R * 0.1, root * 0.95, 10),
+    structureMaterial(0x7d848c, 0.5),
+  )
+  hinge.rotation.z = Math.PI / 2
+  group.add(hinge)
+  return group
 }
 
 function buildShip(): { group: THREE.Group; materials: THREE.Material[] } {
@@ -170,66 +342,111 @@ function buildShip(): { group: THREE.Group; materials: THREE.Material[] } {
     return m
   }
 
-  const barrelH = SHIP_HEIGHT * 0.66
-  const noseH = SHIP_HEIGHT * 0.34
+  const H = SHIP_HEIGHT
+  const skirtH = H * 0.055
+  const noseH = H * 0.265
+  const barrelY0 = skirtH
+  const barrelY1 = H - noseH
+  const barrelH = barrelY1 - barrelY0
 
-  const barrelMat = track(steel())
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1), barrelMat)
-  barrel.position.y = barrelH / 2
+  const skinMat = track(steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.0] }))
+  const noseMat = track(steelMaterial({ color: 0xbcc3cb, repeat: [2, 0.55], normalScale: 0.4 }))
+  const tileSkin = track(tileMaterial([2.6, 4.5]))
+  const tileNose = track(tileMaterial([2.6, 1.7]))
+  const flapMat = track(tileMaterial([1.1, 0.8]))
+
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 1.006, R * 1.01, skirtH, RADIAL, 1),
+    track(steelMaterial({ color: 0x959ca4, repeat: [2, 0.3], normalScale: 0.8 })),
+  )
+  skirt.position.y = skirtH / 2
+  group.add(skirt)
+  group.add(bayPlate(R * 0.99, skirtH * 0.4))
+
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1),
+    skinMat,
+  )
+  barrel.position.y = barrelY0 + barrelH / 2
   group.add(barrel)
 
-  // 鼻錐用 LatheGeometry，比純圓錐有肩線
-  const pts: THREE.Vector2[] = []
-  const N = 14
-  for (let i = 0; i <= N; i++) {
-    const k = i / N
-    pts.push(new THREE.Vector2(R * Math.cos((k * Math.PI) / 2) ** 0.55, barrelH + noseH * k))
-  }
-  const noseMat = track(steel(0xd0d6dd, 0.3))
-  group.add(new THREE.Mesh(new THREE.LatheGeometry(pts, RADIAL), noseMat))
+  const nosePts = noseProfile(barrelY1, noseH, R, 18)
+  group.add(new THREE.Mesh(new THREE.LatheGeometry(nosePts, RADIAL), noseMat))
 
-  addWelds(group, barrelH, 6)
-
-  // 隔熱瓦：迎風面貼一片深色殼（薄圓柱的一半）
-  const tileMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x1b1e22,
-      metalness: 0.1,
-      roughness: 0.95,
-      side: THREE.DoubleSide,
-    }),
-  )
+  // 迎風面六角瓦：桶身與鼻錐各一片薄殼，貼在本體外側一點點
   const tiles = new THREE.Mesh(
-    new THREE.CylinderGeometry(R * 1.02, R * 1.02, barrelH * 0.96, RADIAL, 1, true, -0.9, 1.8),
-    tileMat,
+    new THREE.CylinderGeometry(
+      R * 1.012,
+      R * 1.012,
+      barrelH + skirtH * 0.8,
+      RADIAL,
+      1,
+      true,
+      WINDWARD_CENTER - WINDWARD_HALF,
+      WINDWARD_HALF * 2,
+    ),
+    tileSkin,
   )
-  tiles.position.y = barrelH / 2
+  tiles.position.y = barrelY0 + barrelH / 2 - skirtH * 0.1
   group.add(tiles)
 
-  // 兩片前襟翼、兩片後襟翼
-  const fwd = makeFlap(R * 1.3, SHIP_HEIGHT * 0.15)
-  const aft = makeFlap(R * 1.6, SHIP_HEIGHT * 0.19)
-  for (const [mesh, y, sign] of [
-    [fwd, barrelH * 0.94, 1],
-    [aft, barrelH * 0.18, 1],
-  ] as const) {
-    for (const s of [1, -1]) {
-      const m = mesh.clone()
-      materials.push(m.material as THREE.Material)
-      m.position.set(s * R * 1.15, y, -R * 0.35 * sign)
-      m.rotation.set(0, 0, s * 0.35)
-      group.add(m)
-    }
+  const noseTilePts = noseProfile(barrelY1, noseH, R * 1.012, 18)
+  group.add(
+    new THREE.Mesh(
+      new THREE.LatheGeometry(
+        noseTilePts,
+        RADIAL,
+        WINDWARD_CENTER - WINDWARD_HALF * 0.92,
+        WINDWARD_HALF * 1.84,
+      ),
+      tileNose,
+    ),
+  )
+
+  // V3 的前襟翼往背風面挪、位置更前、尺寸縮小（Musk：舊的太大太重且在 180°）
+  for (const s of [1, -1]) {
+    const a = WINDWARD_CENTER + s * 1.15
+    const flap = makeFlap(R * 1.0, H * 0.10, H * 0.062, flapMat)
+    flap.position.set(Math.sin(a) * R * 0.99, barrelY1 - H * 0.045, Math.cos(a) * R * 0.99)
+    flap.rotation.y = a
+    flap.rotation.x = -0.22 // 略微後掠，貼著箭體
+    group.add(flap)
   }
 
-  const engines = makeEngines(SHIP_ENGINE_RINGS, R * 0.115, R * 0.62)
-  group.add(engines)
+  // 後襟翼：跨在迎風面兩側、靠近底部，是最好認的輪廓
+  for (const s of [1, -1]) {
+    const a = WINDWARD_CENTER + s * 0.92
+    const flap = makeFlap(R * 1.45, H * 0.165, H * 0.105, flapMat)
+    flap.position.set(Math.sin(a) * R * 0.99, barrelY0 + H * 0.1, Math.cos(a) * R * 0.99)
+    flap.rotation.y = a
+    flap.rotation.x = -0.14
+    group.add(flap)
+  }
+
+  // 背風面的酬載艙門接縫
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(R * 0.9, barrelH * 0.3, R * 0.03),
+    track(structureMaterial(0x9aa1a9, 0.55)),
+  )
+  door.position.set(0, barrelY1 - barrelH * 0.24, -R * 1.005)
+  group.add(door)
+
+  group.add(raceway(barrelY0, barrelY1 - H * 0.02, Math.PI * 1.55))
+
+  // 3 具海平面 + 3 具真空。真空版本的噴嘴大得多，那是辨識點。
+  group.add(
+    makeEngines(SHIP_ENGINE_RINGS, [
+      { radius: R * 0.115, length: R * 0.5 },
+      { radius: R * 0.205, length: R * 0.92 },
+    ]),
+  )
 
   return { group, materials }
 }
 
 export function buildRocket(): RocketParts {
-  const { group: booster, ring } = buildBooster()
+  const booster = buildBooster()
+  booster.add(makeEngines(BOOSTER_ENGINE_RINGS, [{ radius: R * 0.082, length: R * 0.42 }]))
   const { group: ship, materials } = buildShip()
-  return { booster, ship, hotStageRing: ring, shipMaterials: materials }
+  return { booster, ship, shipMaterials: materials }
 }

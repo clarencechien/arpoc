@@ -6,7 +6,13 @@
 
 Starship 與 Super Heavy 的幾何、發射台、塔架全部由 `src/scene/` 底下的程式碼在
 執行期以 three.js 的 `CylinderGeometry` / `LatheGeometry` / `ExtrudeGeometry`
-產生。這是刻意的決定：
+產生；表面的焊縫、板材起伏與六角隔熱瓦是 `scene/materials.ts` 在啟動時
+用 canvas 畫出來再轉成的 normal / roughness map，同樣沒有外部檔案。
+
+外形依 **Starship V3（Block 3）**——Flight 12 / 13 飛的載具：熱分離段整合在
+Booster 上不再拋離、3 片 T 字配置的格柵翼、前襟翼移到更偏背風面、全長 124.4 m。
+
+這是刻意的決定：
 
 - Sketchfab 上的候選模型逐一授權不同，得逐個確認，而且多半沒有針對即時渲染最佳化
 - 在 1:200（約 60 cm）的 AR 尺度下，程序化幾何與減面過的掃描模型看不出差別

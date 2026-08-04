@@ -10,10 +10,13 @@
 import { T } from './timeline'
 import { telemetryAt } from './telemetry'
 
-/** 完整堆疊高度（公尺）：121 m 的 1:200。 */
-export const STACK_HEIGHT = 0.605
-export const BOOSTER_HEIGHT = 0.355
+/** 完整堆疊高度（公尺）：Starship V3 的 124.4 m，1:200。 */
+export const STACK_HEIGHT = 0.622
+/** Super Heavy V3：72.3 m */
+export const BOOSTER_HEIGHT = 0.3615
+/** Ship V3：52.1 m */
 export const SHIP_HEIGHT = STACK_HEIGHT - BOOSTER_HEIGHT
+/** 直徑 9 m */
 export const BODY_RADIUS = 0.0225
 
 /** 視覺上升的上限（公尺）。抬頭看得到，又不會穿出天花板。 */
@@ -63,8 +66,6 @@ export interface FlightState {
   booster: { y: number; z: number; pitch: number; visible: boolean }
   /** Ship 底部中心 */
   ship: { y: number; z: number; pitch: number; scale: number; opacity: number }
-  /** 熱分離環：跟著 Booster，直到 T+220 拋離 */
-  hotStageRing: { attached: boolean; y: number; z: number; spin: number; opacity: number }
   /** 0..1 排氣強度 */
   boosterPlume: number
   shipPlume: number
@@ -122,8 +123,10 @@ export function flightStateAt(mission: number): FlightState {
   const shipScale = 1 - 0.62 * away
   const shipOpacity = mission > T.seco - 40 ? 1 - smootherstep(T.seco - 40, T.seco + 6, mission) * 0.85 : 1
 
-  // 引擎狀態
-  const ignitionProgress = clamp01((mission - T.ignition) / 2.4)
+  // 引擎狀態。
+  // V3 的燃料輸送管改設計後 33 具是同時點火的，不再像 V1 那樣分批，
+  // 所以這道由內往外的波只走 0.7 秒——保留環形圖的識別性，但不誤導成分批點火。
+  const ignitionProgress = clamp01((mission - T.ignition) / 0.7)
   const boosterBurning = mission >= T.ignition && mission < T.meco
   const shipBurning = mission >= T.hotStaging && mission < T.seco
   const landingBurning = mission >= T.landingBurn && mission < T.catch
@@ -155,20 +158,10 @@ export function flightStateAt(mission: number): FlightState {
     ? (mission - dustStart) / 4
     : -1
 
-  const jettisoned = mission >= T.jettison
-  const ringT = clamp01((mission - T.jettison) / 12)
-
   return {
     mission,
     booster: { y: bAlt, z: bZ, pitch: bPitch, visible: mission < T.catch + 6 },
     ship: { y: shipY, z: shipZ, pitch: pitch * (1 - 0.55 * away), scale: shipScale, opacity: shipOpacity },
-    hotStageRing: {
-      attached: !jettisoned,
-      y: jettisoned ? bAlt + BOOSTER_HEIGHT + ringT * 0.35 : bAlt + BOOSTER_HEIGHT,
-      z: bZ + ringT * 0.3,
-      spin: ringT * 9,
-      opacity: 1 - ringT,
-    },
     boosterPlume,
     shipPlume,
     landingPlume,

@@ -12,7 +12,13 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createWorld, type World } from './scene/world'
-import { VIS_CEILING, flightStateAt, STACK_HEIGHT, type FlightState } from './sim/flight'
+import {
+  BOOSTER_HEIGHT,
+  STACK_HEIGHT,
+  VIS_CEILING,
+  flightStateAt,
+  type FlightState,
+} from './sim/flight'
 import { telemetryAt } from './sim/telemetry'
 import {
   HOLD_SECONDS,
@@ -42,8 +48,7 @@ function staticFlight(mission: number): FlightState {
   return {
     ...f,
     booster: { y: 0, z: 0, pitch: 0, visible: true },
-    ship: { y: 0.355, z: 0, pitch: 0, scale: 1, opacity: 1 },
-    hotStageRing: { attached: true, y: 0.355, z: 0, spin: 0, opacity: 1 },
+    ship: { y: BOOSTER_HEIGHT, z: 0, pitch: 0, scale: 1, opacity: 1 },
     boosterPlume: 0,
     shipPlume: 0,
     landingPlume: 0,
@@ -101,6 +106,9 @@ export class App {
 
     this.world = createWorld()
     this.world.setEnvironment(this.renderer)
+    // 必須在任何 XR session 之前接上：XREstimatedLight 是靠 renderer.xr 的
+    // 'sessionstart' 事件啟動的，session 開了以後才建構就永遠不會觸發
+    this.world.enableLightEstimation(this.renderer)
 
     this.ar = new ArSession(this.renderer, {
       onReticle: (m) => this.onReticle(m),
@@ -369,7 +377,7 @@ export class App {
     const subject =
       flight.mission >= T.boostbackStart
         ? flight.booster.y
-        : Math.max(flight.booster.y, flight.ship.y - 0.36)
+        : Math.max(flight.booster.y, flight.ship.y - BOOSTER_HEIGHT)
     const climb = Math.min(1, subject / VIS_CEILING)
     const k = 1 - Math.exp(-dt * 1.6) // 與幀率無關的平滑
 

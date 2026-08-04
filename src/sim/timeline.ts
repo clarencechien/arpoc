@@ -28,7 +28,6 @@ export const EVENTS: MissionEvent[] = [
   { t: 159, label: 'HOT-STAGING', chime: true },
   { t: 164, label: 'BOOSTBACK STARTUP', chime: true },
   { t: 218, label: 'BOOSTBACK SHUTDOWN', chime: false },
-  { t: 220, label: 'HOT-STAGE JETTISON', chime: false },
   { t: 385, label: 'TRANSONIC', chime: false },
   { t: 394, label: 'LANDING BURN', chime: true },
   { t: 411, label: 'CATCH', chime: true },
@@ -45,7 +44,6 @@ export const T = {
   hotStaging: 159,
   boostbackStart: 164,
   boostbackEnd: 218,
-  jettison: 220,
   transonic: 385,
   landingBurn: 394,
   catch: 411,
@@ -79,7 +77,7 @@ const RATE_PLAN: RateSegment[] = [
   { t0: 55, t1: 68, rate: 4.0 }, // Max-Q 前後放慢 3.3s
   { t0: 68, t1: 151, rate: 26.0 }, // 3.2s
   { t0: 151, t1: 169, rate: 1.0 }, // MECO / 熱分離 / 回推點火，實時 18.0s
-  { t0: 169, t1: 380, rate: 60.0 }, // 回推關機、拋環、Booster 返場 3.5s
+  { t0: 169, t1: 380, rate: 60.0 }, // 回推關機、Booster 返場 3.5s
   { t0: 380, t1: 416, rate: 9.0 }, // 穿音速 → 落地點火 → 接塔 4.0s
   { t0: 416, t1: MISSION_END, rate: 60.0 }, // Ship 收尾至 SECO 1.5s
 ]
