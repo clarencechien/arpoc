@@ -52,8 +52,12 @@ node scripts/reduced-motion-check.mjs
 ## 部署（GitHub Pages）
 
 `.github/workflows/deploy.yml` 會在推上 `main` 時自動建置並部署。
-第一次要先到 repo 的 **Settings → Pages → Build and deployment → Source**
-選 **GitHub Actions**（不是 `gh-pages` 分支）。
+
+workflow 裡的 `configure-pages` 帶了 `enablement: true`，會在 repo 還沒開
+Pages 時自己用 API 開起來。如果那步仍然報
+`Get Pages site failed ... Not Found`，代表 token 沒有開啟 Pages 的權限，
+手動去 **Settings → Pages → Build and deployment → Source**
+選 **GitHub Actions**（不是 `gh-pages` 分支）再重跑一次即可。
 
 站台會出現在 `https://<user>.github.io/<repo>/`。
 Vite 的 `base` 由 workflow 的 `BASE_PATH` 環境變數帶入 repo 名稱；
