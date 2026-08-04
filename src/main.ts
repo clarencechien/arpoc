@@ -38,7 +38,9 @@ function describe(caps: Capabilities): { text: string; state: string } {
   }
   if (caps.isIOS) {
     return {
-      text: 'iOS Safari 目前沒有 WebXR AR。\n已自動改用桌面模式：同一套場景與時間軸，用手指拖曳環繞觀看。',
+      text:
+        'iOS 沒有 WebXR——Safari 沒有實作，而 iOS 上的其他瀏覽器都用同一個核心。\n' +
+        '已改用桌面模式：同一套場景與時間軸，用手指拖曳環繞觀看。',
       state: 'warn',
     }
   }

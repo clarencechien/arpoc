@@ -18,8 +18,35 @@
    SECO → 再入 → Ship 腹部朝下滑降 → 落地翻轉 → 筷子接塔，約 80 秒
 5. Ship 接塔後定格 3 秒顯示整點（例如 `15:00`），回到待機
 
-不支援 WebXR 的裝置（例如 iOS Safari）自動進入**桌面模式**：同一套場景圖與時間軸，
+不支援 WebXR 的裝置自動進入**桌面模式**：同一套場景圖與時間軸，
 改用 OrbitControls 環繞觀看。降級模式不是次等公民。
+
+## 平台支援
+
+| 平台 | AR 模式 | 桌面模式 |
+|---|---|---|
+| Android Chrome / Edge（ARCore 裝置） | ✅ | ✅ |
+| Meta Quest Browser | ✅ | ✅ |
+| **iOS / iPadOS（所有瀏覽器）** | ❌ | ✅ |
+| Apple Vision Pro Safari | ❌ | ✅ |
+| 桌機瀏覽器 | ❌ | ✅ |
+
+### iOS 為什麼沒有 AR
+
+**Safari 完全沒有實作 WebXR Device API**——不只是 AR 模組，是整個 API 都沒有。
+而 iOS 上的 Chrome、Firefox、Edge 依 App Store 規定都用 WebKit 核心，
+所以換瀏覽器不會有幫助。截至 2026 年 8 月，Apple 未公布任何導入計畫。
+
+Vision Pro 是唯一的例外，但也只有一半：visionOS 2 的 Safari 預設開了
+`immersive-vr`，**AR 模組仍未啟用**，所以這個 `immersive-ar` 應用一樣進不去。
+
+**iOS 使用者實際會拿到什麼**：啟動頁偵測到之後會說明原因，並把「桌面模式」
+變成主要按鈕。進去之後完整 3D 場景、飛行時間軸、遙測 HUD、33 引擎環形圖、
+整點排程、音效、測試面板全部都在——少的只有相機透視畫面與 hit-test 放置，
+改成手指拖曳環繞。不是白畫面，也不是殘廢版。
+
+偵測是問 `navigator.xr.isSessionSupported('immersive-ar')`，不是 UA 白名單。
+Apple 哪天開了，「進入 AR」會自動亮起來，這邊一行都不用改。
 
 ## 開發
 
@@ -180,6 +207,52 @@ window 的 `rAF` 在背景分頁會停掉。
 
 已勾選的項目在無頭 Chromium 上驗過（`npm run smoke`）；
 其餘需要真實裝置與相機，無法在 CI 裡驗證。
+
+iOS 那一條要驗的不是 AR（那確定沒有），而是**偵測邏輯有沒有正確認出 iOS
+並給出對的文案**。iPadOS 的偵測靠
+`navigator.platform === 'MacIntel' && maxTouchPoints > 1`，這個手法一向脆弱，
+實機看一眼最快。
+
+## TODO
+
+### 待實機驗證（做不到，需要真的手機）
+
+- [ ] Android Chrome：AR 全流程與幀率（目標 ≥ 30 fps）。目前完全沒量過，
+      新增的儲罐區、塔架斜撐、程序化貼圖都還沒在行動 GPU 上跑過
+- [ ] `light-estimation` 實際效果——支援與否、環境貼圖有沒有真的反射房間
+- [ ] AR 尺度感：1:200 的 60 cm 在真實房間裡是不是舒服的大小
+- [ ] HUD 面板在白牆與雜亂背景前的可讀性
+- [ ] wake lock、背景分頁五分鐘後回來的整點準時性
+- [ ] iPadOS 的偵測（見上）
+
+### 已知限制（接受，不打算修）
+
+- **iOS 沒有 AR**。三條替代路（陀螺儀＋相機透視偽 AR、AR Quick Look USDZ、
+  8th Wall 之類的商用 SDK）都評估過，決定不做：偽 AR 沒有平面追蹤走動就穿幫，
+  USDZ 只剩模型沒有時鐘，商用 SDK 與「零第三方授權風險 + 純靜態部署」衝突
+- **場景只有一座塔**，Booster 與 Ship 共用。真實計畫是二號塔接 Ship
+- **遙測面板顯示 Ship 的數值**，包含 Booster 返場那一段（比照真實轉播主讀數）
+- **格柵翼的格子在 60 cm 尺度下接近次像素**，實際上是靠輪廓在讀
+- **沒有真實陰影**，只有接觸陰影貼片。行動 GPU 上 shadow map 不划算
+- 字體走 Google Fonts CDN，載入失敗會退回系統窄體（版面不會壞，
+  數字等寬是自己畫格子做的，不依賴字體）
+
+### 隨真實飛行更新
+
+- **Ship 接塔是預測剖面**，不是已發生的事。Flight 13（2026-07-24）完成垂直
+  濺落驗證，Flight 14 預定首次接塔。真的飛了之後，`sim/timeline.ts` 的
+  `EVENTS` 與 `sim/flight.ts` 的返場曲線應該換成實際轉播時間
+- 上升段仍照 Flight 6（V1）的時間軸，載具卻是 V3。若 SpaceX 公布 V3 的
+  完整任務時間軸，整張表可以換掉
+
+### 可能的下一步（沒人要求，只是記著）
+
+- **M6 資產替換**：`scene/rocket.ts` 的介面已經預留好（booster / ship 各自
+  獨立 Group、原點在底部中心），要換 GLB 不用動其他檔案
+- 音效目前是合成的方波與棕噪音，可以做得更有層次（分離的爆震、風噪）
+- 桌面模式的自動取景在 Ship 再入段還是偏遠，可以再分一段
+- 排程只支援整點；若要「每半小時」之類的，`HourlyScheduler` 的
+  `computeNextMark` 是唯一要改的地方
 
 ## 測試入口
 
