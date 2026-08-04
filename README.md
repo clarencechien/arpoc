@@ -78,12 +78,13 @@ src/
     flight.ts      任務時間 → 場景姿態（含視覺高度壓縮）
     scheduler.ts   整點排程（自我校正迴圈 + 遲到策略）
   scene/
-    rocket.ts      程序化 Starship / Super Heavy
+    rocket.ts      程序化 Starship V3 / Super Heavy V3
+    materials.ts   程序化貼圖（焊縫、板材、六角隔熱瓦）
     pad.ts         發射台與塔架
     effects.ts     尾焰 shader、塵埃環、火花粒子池
     world.ts       場景組裝與每幀套用
   hud/panel.ts     3D billboard 遙測面板（canvas texture）
-  ar/session.ts    WebXR session、hit-test、wake lock、能力偵測
+  ar/session.ts    WebXR session、hit-test、wake lock、light estimation、能力偵測
   audio/audio.ts   Web Audio 合成
   app.ts           狀態機、播放控制、輸入
   main.ts          DOM 接線
@@ -135,7 +136,7 @@ window 的 `rAF` 在背景分頁會停掉。
 
 ## 與 handoff 規格的差異
 
-三處，都是規格本身有矛盾或不足：
+四處，都是規格本身有矛盾或不足：
 
 1. **總長約 52 秒，不是 45 秒。**
    handoff §5 的速率表本身就要 80 秒實時（`T-10 → T+70` 全段 1.0×），
