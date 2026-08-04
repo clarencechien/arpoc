@@ -48,8 +48,9 @@ const WINDWARD_HALF = 1.02
 export interface RocketParts {
   booster: THREE.Group
   ship: THREE.Group
-  /** Ship 上的所有材質，供淡出時統一調 opacity */
+  /** 淡出時統一調 opacity 用 */
   shipMaterials: THREE.Material[]
+  boosterMaterials: THREE.Material[]
 }
 
 // ── 共用零件 ─────────────────────────────────────────────
@@ -330,17 +331,22 @@ function makeFlap(
   )
   hinge.rotation.z = Math.PI / 2
   group.add(hinge)
+
+  // 根部整流罩：貼著鉸鏈的半圓殼，蓋住翼與箭體的接縫
+  const fairing = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 0.16, R * 0.16, root * 1.1, 10, 1, false, 0, Math.PI),
+    structureMaterial(0x22262b, 0.9),
+  )
+  fairing.rotation.z = Math.PI / 2
+  fairing.position.z = -R * 0.02
+  group.add(fairing)
   return group
 }
 
-function buildShip(): { group: THREE.Group; materials: THREE.Material[] } {
+function buildShip(): { group: THREE.Group } {
   const group = new THREE.Group()
   group.name = 'ship'
-  const materials: THREE.Material[] = []
-  const track = <M extends THREE.Material>(m: M): M => {
-    materials.push(m)
-    return m
-  }
+  const track = <M extends THREE.Material>(m: M): M => m
 
   const H = SHIP_HEIGHT
   const skirtH = H * 0.055
@@ -441,12 +447,29 @@ function buildShip(): { group: THREE.Group; materials: THREE.Material[] } {
     ]),
   )
 
-  return { group, materials }
+  return { group }
+}
+
+function collectMaterials(root: THREE.Object3D): THREE.Material[] {
+  const set = new Set<THREE.Material>()
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (mesh.material) {
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) set.add(m)
+    }
+  })
+  return [...set]
 }
 
 export function buildRocket(): RocketParts {
   const booster = buildBooster()
   booster.add(makeEngines(BOOSTER_ENGINE_RINGS, [{ radius: R * 0.082, length: R * 0.42 }]))
-  const { group: ship, materials } = buildShip()
-  return { booster, ship, shipMaterials: materials }
+  const { group: ship } = buildShip()
+  return {
+    booster,
+    ship,
+    // traverse 收集比逐一 track 可靠：clone 出來的襟翼材質也會被抓到
+    shipMaterials: collectMaterials(ship),
+    boosterMaterials: collectMaterials(booster),
+  }
 }

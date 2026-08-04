@@ -12,7 +12,7 @@ import { buildRocket } from './rocket'
 import { buildPad } from './pad'
 import { makeDustRing, makePlume, makeSparks } from './effects'
 import { createHudPanel, type HudPanel, type PanelState } from '../hud/panel'
-import { BODY_RADIUS, BOOSTER_HEIGHT, type FlightState } from '../sim/flight'
+import { BODY_RADIUS, BOOSTER_HEIGHT, SHIP_HEIGHT, type FlightState } from '../sim/flight'
 import { HEX } from '../theme'
 
 function contactShadowTexture(): THREE.Texture {
@@ -65,9 +65,10 @@ export function createWorld(): World {
   anchor.visible = false
   scene.add(anchor)
 
-  anchor.add(buildPad())
+  const pad = buildPad()
+  anchor.add(pad.group)
 
-  const { booster, ship, shipMaterials } = buildRocket()
+  const { booster, ship, shipMaterials, boosterMaterials } = buildRocket()
   const padDeckY = BODY_RADIUS * 1.775 // 發射台桌面高度，火箭站在上面
   const stack = new THREE.Group()
   stack.position.y = padDeckY
@@ -88,9 +89,9 @@ export function createWorld(): World {
   shadow.position.y = 0.001
   anchor.add(shadow)
 
-  const boosterPlume = makePlume(0.85, 9)
-  const shipPlume = makePlume(0.6, 5.5)
-  const landingPlume = makePlume(0.5, 4)
+  const boosterPlume = makePlume(1.25, 15)
+  const shipPlume = makePlume(0.8, 8)
+  const landingPlume = makePlume(0.7, 5.5)
   booster.add(boosterPlume.object)
   ship.add(shipPlume.object)
   booster.add(landingPlume.object)
@@ -100,6 +101,23 @@ export function createWorld(): World {
 
   const sparks = makeSparks()
   anchor.add(sparks.object)
+
+  // 再入電漿光暈：包著 Ship 的拉長橢球，additive、不寫深度
+  const entryGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 16, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0xff8a3d,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.BackSide,
+    }),
+  )
+  entryGlow.scale.set(BODY_RADIUS * 2.6, SHIP_HEIGHT * 0.72, BODY_RADIUS * 2.6)
+  entryGlow.position.y = SHIP_HEIGHT / 2
+  entryGlow.visible = false
+  ship.add(entryGlow)
 
   // 面板放在塔架的對側偏前方：繞著載具走的時候它跟著留在原地
   const panel = createHudPanel()
@@ -128,23 +146,49 @@ export function createWorld(): World {
   })
   const sparkOrigin = new THREE.Vector3()
 
-  function applyFlight(f: FlightState, dt: number, elapsed: number): void {
-    booster.visible = f.booster.visible
-    booster.position.set(0, f.booster.y, f.booster.z)
-    booster.rotation.x = f.booster.pitch
+  const qHeading = new THREE.Quaternion()
+  const qBelly = new THREE.Quaternion()
+  const qRoll = new THREE.Quaternion()
+  const qTilt = new THREE.Quaternion()
+  const X_AXIS = new THREE.Vector3(1, 0, 0)
+  const Y_AXIS = new THREE.Vector3(0, 1, 0)
+  const Z_AXIS = new THREE.Vector3(0, 0, 1)
 
-    ship.position.set(0, f.ship.y, f.ship.z)
-    ship.rotation.x = f.ship.pitch
-    ship.scale.setScalar(f.ship.scale)
-    for (const m of shipMaterials) {
+  function fadeMaterials(list: THREE.Material[], opacity: number): void {
+    for (const m of list) {
       const mm = m as THREE.MeshStandardMaterial
-      if (f.ship.opacity < 0.999) {
+      if (opacity < 0.999) {
         mm.transparent = true
-        mm.opacity = f.ship.opacity
+        mm.opacity = opacity
       } else if (mm.transparent && mm.opacity >= 0.999) {
         mm.transparent = false
+        mm.opacity = 1
       }
     }
+  }
+
+  function applyFlight(f: FlightState, dt: number, elapsed: number): void {
+    booster.visible = f.booster.visible && f.booster.opacity > 0.01
+    booster.position.set(f.booster.x, f.booster.y, 0)
+    booster.rotation.set(0, 0, f.booster.tilt)
+    fadeMaterials(boosterMaterials, f.booster.opacity)
+
+    ship.visible = f.ship.opacity > 0.01
+    ship.position.set(f.ship.x, f.ship.y, 0)
+    // 姿態合成：heading（繞世界 Y）→ belly（壓平）→ roll（瓦面轉朝下）→ tilt（上升弧）
+    qHeading.setFromAxisAngle(Y_AXIS, f.ship.heading)
+    qBelly.setFromAxisAngle(X_AXIS, f.ship.belly)
+    qRoll.setFromAxisAngle(Y_AXIS, f.ship.roll)
+    qTilt.setFromAxisAngle(Z_AXIS, f.ship.tilt)
+    ship.quaternion.copy(qHeading).multiply(qBelly).multiply(qRoll).multiply(qTilt)
+    ship.scale.setScalar(f.ship.scale)
+    fadeMaterials(shipMaterials, f.ship.opacity)
+
+    const glowMat = entryGlow.material as THREE.MeshBasicMaterial
+    glowMat.opacity = f.entryGlow * 0.55
+    entryGlow.visible = f.entryGlow > 0.02
+
+    pad.setChopsticks(f.chopsticks)
 
     boosterPlume.setIntensity(f.boosterPlume)
     shipPlume.setIntensity(f.shipPlume)
@@ -158,7 +202,7 @@ export function createWorld(): World {
     // 火花只在貼近地面時才有意義
     const nearGround = f.booster.y < BODY_RADIUS * 6
     if (nearGround && (f.boosterPlume > 0.05 || f.landingPlume > 0.05)) {
-      sparkOrigin.set(0, padDeckY + f.booster.y, f.booster.z)
+      sparkOrigin.set(f.booster.x, padDeckY + f.booster.y, 0)
       sparks.emit(sparkOrigin, Math.max(f.boosterPlume, f.landingPlume), dt)
     }
     sparks.update(dt)
@@ -192,9 +236,14 @@ export function createWorld(): World {
       booster.visible = true
       booster.position.set(0, 0, 0)
       booster.rotation.set(0, 0, 0)
+      ship.visible = true
       ship.position.set(0, BOOSTER_HEIGHT, 0)
-      ship.rotation.set(0, 0, 0)
+      ship.quaternion.identity()
       ship.scale.setScalar(1)
+      pad.setChopsticks(0)
+      ;(entryGlow.material as THREE.MeshBasicMaterial).opacity = 0
+      entryGlow.visible = false
+      fadeMaterials(boosterMaterials, 1)
       boosterPlume.setIntensity(0)
       shipPlume.setIntensity(0)
       landingPlume.setIntensity(0)

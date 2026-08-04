@@ -9,7 +9,11 @@
  * 區段邊界用 log-rate 的 smoothstep 過渡，避免速率瞬間跳變。
  */
 
-/** 事件標籤：取自 Starship Flight 6 公開任務時間軸（Max-Q 參照 Flight 8）。 */
+/**
+ * 事件標籤：上升與 Booster 返場取自 Starship Flight 6 公開任務時間軸
+ * （Max-Q 參照 Flight 8）；Ship 再入段取自 Flight 6 的 Ship 濺落時序，
+ * 結尾的 Ship 接塔為 Flight 14 預定剖面（Flight 13 已驗證垂直濺落）。
+ */
 export interface MissionEvent {
   /** 任務時間（秒） */
   t: number
@@ -30,8 +34,14 @@ export const EVENTS: MissionEvent[] = [
   { t: 218, label: 'BOOSTBACK SHUTDOWN', chime: false },
   { t: 385, label: 'TRANSONIC', chime: false },
   { t: 394, label: 'LANDING BURN', chime: true },
-  { t: 411, label: 'CATCH', chime: true },
+  { t: 411, label: 'BOOSTER CATCH', chime: true },
   { t: 507, label: 'SECO', chime: true },
+  { t: 540, label: 'COAST', chime: false },
+  { t: 2845, label: 'ENTRY INTERFACE', chime: true },
+  { t: 3810, label: 'SHIP TRANSONIC', chime: false },
+  { t: 3977, label: 'LANDING FLIP', chime: true },
+  { t: 3981, label: 'SHIP LANDING BURN', chime: false },
+  { t: 3996, label: 'SHIP CATCH', chime: true },
 ]
 
 /** 常用時間點，讓其他模組不必用魔術數字。 */
@@ -48,10 +58,14 @@ export const T = {
   landingBurn: 394,
   catch: 411,
   seco: 507,
+  entry: 2845,
+  shipTransonic: 3810,
+  landingFlip: 3977,
+  shipCatch: 3996,
 } as const
 
 export const MISSION_START = -10
-export const MISSION_END = T.seco
+export const MISSION_END = T.shipCatch + 2
 
 /** SECO 之後 HUD 定格顯示整點的秒數。 */
 export const HOLD_SECONDS = 3
@@ -67,8 +81,8 @@ interface RateSegment {
  * 決策（handoff §5）：戲劇性的段落走 1.0× 實時，其餘壓縮。
  *
  * 註：handoff 表列的速率（T-10→T+70 全段 1.0×）本身就要 80 秒實時，
- * 與同一節宣稱的「總長約 45 秒」互相矛盾。這裡保留了它真正在意的兩段實時
- * ——倒數與熱分離——其餘再壓緊，總長約 50 秒。
+ * 與同一節宣稱的「總長約 45 秒」互相矛盾。這裡保留三段實時／近實時
+ * ——倒數、熱分離、Ship 落地翻轉接塔——其餘壓緊，總長約 80 秒。
  */
 const RATE_PLAN: RateSegment[] = [
   { t0: -10, t1: 0, rate: 1.0 }, // 倒數，實時 10.0s
@@ -78,8 +92,13 @@ const RATE_PLAN: RateSegment[] = [
   { t0: 68, t1: 151, rate: 26.0 }, // 3.2s
   { t0: 151, t1: 169, rate: 1.0 }, // MECO / 熱分離 / 回推點火，實時 18.0s
   { t0: 169, t1: 380, rate: 60.0 }, // 回推關機、Booster 返場 3.5s
-  { t0: 380, t1: 416, rate: 9.0 }, // 穿音速 → 落地點火 → 接塔 4.0s
-  { t0: 416, t1: MISSION_END, rate: 60.0 }, // Ship 收尾至 SECO 1.5s
+  { t0: 380, t1: 416, rate: 9.0 }, // 穿音速 → 落地點火 → Booster 接塔 4.0s
+  { t0: 416, t1: 515, rate: 60.0 }, // SECO 1.7s
+  { t0: 515, t1: 2800, rate: 900.0 }, // 軌道滑行 2.5s
+  { t0: 2800, t1: 2880, rate: 25.0 }, // 再入電漿 3.2s
+  { t0: 2880, t1: 3800, rate: 320.0 }, // 高空滑降 2.9s
+  { t0: 3800, t1: 3968, rate: 28.0 }, // 腹部朝下滑降 6.0s
+  { t0: 3968, t1: MISSION_END, rate: 2.2 }, // 落地翻轉 → 點火 → 接塔 13.6s
 ]
 
 function smoothstep(x: number): number {

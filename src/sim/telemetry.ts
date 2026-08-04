@@ -1,9 +1,10 @@
 /**
  * 遙測曲線。
  *
- * 不做真實物理（handoff §5）：用預先擬合、單調遞增的曲線，對齊關鍵點：
+ * 不做真實物理（handoff §5）：用預先擬合的曲線，對齊關鍵點：
  *   Max-Q  T+62   約 12 km / 1,400 km/h
  *   MECO   T+152  約 65 km / 5,800 km/h
+ *   再入之後照 Flight 6 的 Ship 濺落剖面遞減回 0
  * 其餘節點是為了讓曲線形狀看起來合理而放的。
  */
 
@@ -25,6 +26,14 @@ const ALTITUDE: Anchor[] = [
   [320, 122.0],
   [420, 143.0],
   [T.seco, 152.0],
+  [900, 186.0],
+  [2400, 190.0],
+  [T.entry, 120.0],
+  [3300, 62.0],
+  [T.shipTransonic, 18.0],
+  [3900, 4.2],
+  [T.landingFlip, 0.7],
+  [T.shipCatch, 0.0],
 ]
 
 /** 速度 km/h（對地） */
@@ -41,6 +50,14 @@ const SPEED: Anchor[] = [
   [320, 16200],
   [420, 21800],
   [T.seco, 26600],
+  [900, 26850],
+  [2400, 26900],
+  [T.entry, 26400],
+  [3300, 8500],
+  [T.shipTransonic, 1150],
+  [3900, 420],
+  [T.landingFlip, 290],
+  [T.shipCatch, 0],
 ]
 
 function smootherstep(x: number): number {
