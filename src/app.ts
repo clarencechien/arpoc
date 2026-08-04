@@ -47,12 +47,23 @@ function staticFlight(mission: number): FlightState {
   const f = flightStateAt(mission)
   return {
     ...f,
-    booster: { y: 0, z: 0, pitch: 0, visible: true },
-    ship: { y: BOOSTER_HEIGHT, z: 0, pitch: 0, scale: 1, opacity: 1 },
+    booster: { x: 0, y: 0, tilt: 0, visible: true, opacity: 1 },
+    ship: {
+      x: 0,
+      y: BOOSTER_HEIGHT,
+      tilt: 0,
+      belly: 0,
+      heading: 0,
+      roll: 0,
+      scale: 1,
+      opacity: 1,
+    },
     boosterPlume: 0,
     shipPlume: 0,
     landingPlume: 0,
+    entryGlow: 0,
     dust: -1,
+    chopsticks: 0,
     engines: {
       ...f.engines,
       // 環形圖仍然切換狀態（那是資訊），但不做依序點亮的動畫
@@ -102,7 +113,7 @@ export class App {
     this.renderer.toneMappingExposure = 1.1
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.01, 40)
-    this.camera.position.set(0.3, 0.5, 1.22)
+    this.camera.position.set(0.32, 0.52, 1.42)
 
     this.world = createWorld()
     this.world.setEnvironment(this.renderer)
@@ -372,12 +383,18 @@ export class App {
   private frameVehicle(flight: FlightState, dt: number): void {
     const c = this.controls
     if (!c || !c.enabled || this.renderer.xr.isPresenting) return
-    // 回推點火之後主角換成返場的 Booster——Ship 這時已經縮小淡出，
-    // 還跟著它取景只會把鏡頭一直吊在空中，而地面上正在發生落地點火。
-    const subject =
-      flight.mission >= T.boostbackStart
-        ? flight.booster.y
-        : Math.max(flight.booster.y, flight.ship.y - BOOSTER_HEIGHT)
+    // 主角依階段切換：上升＝堆疊、Booster 返場＝Booster、
+    // 接塔後回到地面、Ship 再入＝Ship
+    let subject: number
+    if (flight.mission < T.boostbackStart) {
+      subject = Math.max(flight.booster.y, flight.ship.y - BOOSTER_HEIGHT)
+    } else if (flight.mission < T.catch + 40) {
+      subject = flight.booster.y
+    } else if (flight.mission < T.entry - 80) {
+      subject = 0
+    } else {
+      subject = flight.ship.y
+    }
     const climb = Math.min(1, subject / VIS_CEILING)
     const k = 1 - Math.exp(-dt * 1.6) // 與幀率無關的平滑
 
@@ -386,7 +403,7 @@ export class App {
     const dir = this.camOffset.subVectors(this.camera.position, c.target)
     const dist = dir.length()
     if (dist > 1e-4) {
-      const want = 1.2 + 1.7 * climb
+      const want = 1.35 + 1.85 * climb
       this.camera.position.copy(c.target).addScaledVector(dir.divideScalar(dist), dist + (want - dist) * k)
     }
   }

@@ -67,10 +67,13 @@ for (const [wait, name] of stamps) {
   console.log(name.padEnd(14), '|', String(st).slice(0, 42).padEnd(42), '|', sv)
 }
 
-await scrubTo(0.66, '09-boostback')
-await scrubTo(0.90, '10-transonic')
-await scrubTo(0.955, '11-catch')
-await scrubTo(1.0, '12-seco')
+await scrubTo(0.40, '09-boostback')
+await scrubTo(0.625, '10-booster-catch')
+await scrubTo(0.70, '11-entry')
+await scrubTo(0.85, '12-bellyflop')
+await scrubTo(0.93, '13-flip')
+await scrubTo(0.975, '14-ship-catch')
+await scrubTo(1.0, '15-hold')
 
 console.log('\n--- console ---')
 console.log(errors.length ? errors.join('\n') : '(clean)')
