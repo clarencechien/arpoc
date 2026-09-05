@@ -6,8 +6,8 @@
  */
 
 import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { XREstimatedLight } from 'three/examples/jsm/webxr/XREstimatedLight.js'
+import { SkyEnvironment, SUN_DIRECTION } from './sky'
 import { buildRocket } from './rocket'
 import { buildPad } from './pad'
 import { makeDustRing, makePlume, makeSparks } from './effects'
@@ -29,6 +29,11 @@ function contactShadowTexture(): THREE.Texture {
   return new THREE.CanvasTexture(c)
 }
 
+/** 原本 RoomEnvironment 用 0.55；天空 env 本身有對比，可以開到正常亮度。 */
+const SKY_ENV_INTENSITY = 1.2
+/** 環境貼圖的基準傾角（rad），見 setEnvironment 的說明。 */
+const ENV_TILT_BASE = 0.28
+
 export interface World {
   scene: THREE.Scene
   /** 整個發射場，AR 模式下會被移到 hit-test 命中的位置 */
@@ -45,6 +50,8 @@ export interface World {
   setEnvironment(renderer: THREE.WebGLRenderer): void
   /** 必須在任何 XR session 開始之前呼叫；裝置支援的話改用現場光照 */
   enableLightEstimation(renderer: THREE.WebGLRenderer): void
+  /** 開關 shadow map（AR 掉幀時的 fallback）。會讓所有材質重新編譯，不要每幀呼叫。 */
+  setShadows(renderer: THREE.WebGLRenderer, on: boolean): void
 }
 
 export function createWorld(): World {
@@ -54,11 +61,27 @@ export function createWorld(): World {
   const studioLights = new THREE.Group()
   const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x2a2f36, 1.6)
   const key = new THREE.DirectionalLight(0xffffff, 2.2)
-  key.position.set(1.2, 2.4, 1.0)
+  key.position.copy(SUN_DIRECTION).multiplyScalar(2.8) // 與天空的太陽同方向
   const fill = new THREE.DirectionalLight(0x9fb4cc, 0.7)
   fill.position.set(-1.5, 0.8, -1.2)
   studioLights.add(hemi, key, fill)
   scene.add(studioLights)
+
+  // 只有 key light 投影。shadow camera 收緊到載具 bounding box——
+  // 2048 的解析度要全部花在火箭上，範圍給大就浪費掉了。
+  // 位置與 target 在 applyFlight 裡每幀跟著載具走。
+  key.castShadow = true
+  key.shadow.mapSize.set(2048, 2048)
+  key.shadow.camera.left = -0.34
+  key.shadow.camera.right = 0.34
+  key.shadow.camera.top = 0.48
+  key.shadow.camera.bottom = -0.42
+  key.shadow.camera.near = 0.4
+  key.shadow.camera.far = 6
+  key.shadow.bias = -0.00035
+  key.shadow.normalBias = 0.012 // 細圓柱與薄板最容易出 shadow acne，這個比 bias 有效
+  scene.add(key.target)
+  const shadowTarget = new THREE.Vector3()
 
   const anchor = new THREE.Group()
   anchor.name = 'launchSite'
@@ -74,6 +97,20 @@ export function createWorld(): World {
   stack.position.y = padDeckY
   stack.add(booster, ship)
   anchor.add(stack)
+
+  // 箭體、襟翼、格柵翼、塔架都投影；箭體自己與發射台也接影（自我遮蔽是重點）。
+  // 必須在尾焰、光暈這些 additive 透明物件被 add 進來**之前**做，
+  // 否則 traverse 會讓火焰投出一塊黑影。
+  const setShadowFlags = (root: THREE.Object3D) =>
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    })
+  setShadowFlags(booster)
+  setShadowFlags(ship)
+  setShadowFlags(pad.group)
 
   // 接觸陰影：比 shadow map 便宜得多，AR 裡的作用就是把物件「黏」在地板上
   const shadow = new THREE.Mesh(
@@ -171,6 +208,7 @@ export function createWorld(): World {
     booster.visible = f.booster.visible && f.booster.opacity > 0.01
     booster.position.set(f.booster.x, f.booster.y, 0)
     booster.rotation.set(0, 0, f.booster.tilt)
+    booster.scale.setScalar(f.booster.scale) // 壓縮空間裡靠縮小賣距離感
     fadeMaterials(boosterMaterials, f.booster.opacity)
 
     ship.visible = f.ship.opacity > 0.01
@@ -189,6 +227,23 @@ export function createWorld(): World {
     entryGlow.visible = f.entryGlow > 0.02
 
     pad.setChopsticks(f.chopsticks)
+
+    // shadow camera 跟著載具：Booster 還在（含掛在塔上）就跟 Booster，
+    // 否則跟 Ship（再入返場那段）。光源沿太陽方向退 2.8 m，frustum 相對光源固定。
+    const followBooster = f.booster.visible && f.booster.opacity > 0.5
+    shadowTarget.set(
+      followBooster ? f.booster.x : f.ship.x,
+      (followBooster ? f.booster.y : f.ship.y) + BOOSTER_HEIGHT * 0.45,
+      0,
+    )
+    stack.localToWorld(shadowTarget)
+    key.target.position.copy(shadowTarget)
+    key.position.copy(shadowTarget).addScaledVector(SUN_DIRECTION, 2.8)
+
+    // 升空時讓反射的地平線跟著慢慢傾斜——鏡面上那條分界線動起來的瞬間
+    // 說服力很高，而且只是一個 Euler 分量，零成本。
+    const climb = Math.min(1, Math.max(f.booster.y, f.ship.y - BOOSTER_HEIGHT) / 1.2)
+    scene.environmentRotation.x = ENV_TILT_BASE - 0.5 * climb
 
     boosterPlume.setIntensity(f.boosterPlume)
     shipPlume.setIntensity(f.shipPlume)
@@ -236,6 +291,7 @@ export function createWorld(): World {
       booster.visible = true
       booster.position.set(0, 0, 0)
       booster.rotation.set(0, 0, 0)
+      booster.scale.setScalar(1)
       ship.visible = true
       ship.position.set(0, BOOSTER_HEIGHT, 0)
       ship.quaternion.identity()
@@ -286,17 +342,38 @@ export function createWorld(): World {
         scene.remove(xrLight)
         studioLights.visible = true
         if (studioEnv) {
+          // 還原成天空 env，不是 RoomEnvironment
           scene.environment = studioEnv
-          scene.environmentIntensity = 0.55
+          scene.environmentIntensity = SKY_ENV_INTENSITY
           studioEnv = null
         }
       })
     },
+    setShadows(renderer: THREE.WebGLRenderer, on: boolean) {
+      if (renderer.shadowMap.enabled === on) return
+      renderer.shadowMap.enabled = on
+      key.castShadow = on
+      // shadowMap.enabled 改了之後 shader 要重編，three 不會自動做
+      scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const m of mats) m.needsUpdate = true
+      })
+    },
     setEnvironment(renderer: THREE.WebGLRenderer) {
-      // 不鏽鋼要有東西可以反射，否則 metalness 0.9 會變成一片死黑
+      // 金屬的長相由 environment 單獨決定（燈光對它幾乎沒貢獻），
+      // 所以這裡放的是「亮天空 / 暗地面 / 硬邊地平線 / 過曝太陽」，
+      // 不是攝影棚方盒。詳見 sky.ts。
       const pmrem = new THREE.PMREMGenerator(renderer)
-      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-      scene.environmentIntensity = 0.55
+      const sky = new SkyEnvironment()
+      scene.environment = pmrem.fromScene(sky, 0.03).texture
+      scene.environmentIntensity = SKY_ENV_INTENSITY
+      // y：轉到太陽側落在箭體正面偏側。
+      // x：基準先傾 0.28 rad——地平線變成一個斜的大圓，箭體一側映天、另一側映地，
+      // 就是真實照片上那種左右明暗帶。applyFlight 再隨高度疊加變化。
+      scene.environmentRotation.set(ENV_TILT_BASE, -0.6, 0)
+      sky.dispose()
       pmrem.dispose()
     },
   }

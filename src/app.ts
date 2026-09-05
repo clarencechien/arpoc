@@ -12,6 +12,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createWorld, type World } from './scene/world'
+import { setMaxAnisotropy } from './scene/materials'
 import {
   BOOSTER_HEIGHT,
   STACK_HEIGHT,
@@ -29,6 +30,7 @@ import {
   eventAt,
   eventsBetween,
   formatMissionTime,
+  missionToPlay,
   playToMission,
   T,
 } from './sim/timeline'
@@ -47,7 +49,7 @@ function staticFlight(mission: number): FlightState {
   const f = flightStateAt(mission)
   return {
     ...f,
-    booster: { x: 0, y: 0, tilt: 0, visible: true, opacity: 1 },
+    booster: { x: 0, y: 0, tilt: 0, scale: 1, visible: true, opacity: 1 },
     ship: {
       x: 0,
       y: BOOSTER_HEIGHT,
@@ -92,6 +94,14 @@ export class App {
   private lastFrameMs = 0
   private lastPanelDraw = 0
 
+  /** scripts/inspect.mjs 固定機位時鎖住自動取景 */
+  private cameraLocked = false
+
+  /** AR 幀率監看：滑動平均低於門檻持續一段時間就關陰影（僅 AR，明確標註的效能 fallback） */
+  private fpsAvg = 60
+  private lowFpsSince = 0
+  private shadowsOn = true
+
   private readonly reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
@@ -108,12 +118,20 @@ export class App {
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
+    // 真實陰影是 CG 感的第二大來源（第一是環境貼圖）：襟翼在箭體上要有投影、
+    // 格柵翼格子裡要有暗部。AR 掉幀時由 monitorFps() 關掉，改吃 aoMap。
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.1
+    // T4 把金屬 base color 提亮後整體偏亮，在這裡收曝光，不要把顏色調回去
+    this.renderer.toneMappingExposure = 1.0
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.01, 40)
     this.camera.position.set(0.32, 0.52, 1.42)
+
+    // 貼圖 anisotropy 要在建場景（第一次生成貼圖）之前注入
+    setMaxAnisotropy(this.renderer.capabilities.getMaxAnisotropy())
 
     this.world = createWorld()
     this.world.setEnvironment(this.renderer)
@@ -173,6 +191,7 @@ export class App {
       this.controls = c
     }
     this.controls.enabled = true
+    this.cameraLocked = false
     this.toStandby()
     this.setStatus('待機中。點擊火箭即可手動發射。', 'idle')
   }
@@ -346,7 +365,10 @@ export class App {
     this.lastFrameMs = timeMs
     const elapsed = timeMs / 1000
 
-    if (this.ar.active) this.ar.updateHitTest(xrFrame ?? null)
+    if (this.ar.active) {
+      this.ar.updateHitTest(xrFrame ?? null)
+      this.monitorFps(dt, timeMs)
+    }
     this.controls?.update()
 
     if (this.state === 'playing') this.advance(dt)
@@ -374,15 +396,57 @@ export class App {
   }
 
   /**
+   * 【AR 專用效能 fallback】shadow map 在行動 GPU 上不便宜。
+   * 進 AR 後量滑動平均幀率，低於 30 fps 持續 2 秒就關掉陰影（aoMap 仍在，
+   * 凹處還是暗的）。只關不開：抖動地開關陰影比一直沒有陰影更糟。
+   * 桌面模式不走這裡——桌面不是效能瓶頸所在，也沒有 30 fps 的硬目標。
+   */
+  private monitorFps(dt: number, nowMs: number): void {
+    if (!this.shadowsOn || dt <= 0) return
+    const fps = 1 / dt
+    this.fpsAvg += (fps - this.fpsAvg) * 0.08
+    if (this.fpsAvg >= 30) {
+      this.lowFpsSince = 0
+      return
+    }
+    if (this.lowFpsSince === 0) this.lowFpsSince = nowMs
+    if (nowMs - this.lowFpsSince > 2000) {
+      this.shadowsOn = false
+      this.world.setShadows(this.renderer, false)
+      this.setStatus('幀率不足，已關閉陰影以維持流暢。', 'idle')
+    }
+  }
+
+  /**
    * 桌面模式的取景。
    *
    * AR 不做這件事——那裡是使用者自己抬頭。桌面模式沒有這個動作，
    * 火箭一升空就出畫，所以隨著高度把鏡頭往後拉、目標點往上抬，
    * 讓載具與錨定在發射台旁的遙測面板同時留在畫面裡。
    */
+  /**
+   * 固定機位（給 scripts/inspect.mjs 的 contact sheet 用）。
+   * 只在桌面模式有意義；設定後自動取景停用，直到下次進入場景。
+   */
+  debugView(pos: [number, number, number], target: [number, number, number], panel = true): void {
+    const c = this.controls
+    if (!c) return
+    this.cameraLocked = true
+    c.minDistance = 0.02 // 特寫機位比正常互動的最小距離近
+    c.target.set(target[0], target[1], target[2])
+    this.camera.position.set(pos[0], pos[1], pos[2])
+    c.update()
+    this.world.panel.setOpacity(panel ? 1 : 0)
+  }
+
+  /** 直接跳到指定任務秒並暫停（scripts/trajectory.mjs 逐時刻截圖用）。 */
+  debugMission(mission: number): void {
+    this.scrubTo(missionToPlay(mission) / PLAY_DURATION)
+  }
+
   private frameVehicle(flight: FlightState, dt: number): void {
     const c = this.controls
-    if (!c || !c.enabled || this.renderer.xr.isPresenting) return
+    if (!c || !c.enabled || this.renderer.xr.isPresenting || this.cameraLocked) return
     // 主角依階段切換：上升＝堆疊、Booster 返場＝Booster、
     // 接塔後回到地面、Ship 再入＝Ship
     let subject: number
@@ -396,7 +460,7 @@ export class App {
       subject = flight.ship.y
     }
     const climb = Math.min(1, subject / VIS_CEILING)
-    const k = 1 - Math.exp(-dt * 1.6) // 與幀率無關的平滑
+    const k = 1 - Math.exp(-dt * 2.4) // 與幀率無關的平滑；26× 段載具移動快，追焦要跟得上
 
     c.target.y += (0.26 + 0.52 * climb - c.target.y) * k
 

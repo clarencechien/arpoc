@@ -20,7 +20,7 @@ function box(w: number, h: number, d: number, mat: THREE.Material): THREE.Mesh {
 
 function buildOLM(): THREE.Group {
   const olm = new THREE.Group()
-  const structure = structureMaterial(0x5c636c, 0.62)
+  const structure = structureMaterial(0x6f767e, 0.62)
   const dark = structureMaterial(0x2a2e33, 0.85)
 
   // 六邊形檯面
@@ -61,14 +61,21 @@ function buildOLM(): THREE.Group {
   clamps.instanceMatrix.needsUpdate = true
   olm.add(clamps)
 
-  // 六支腿 + 斜撐
+  // 六支腿：真實 OLM 的腿是粗壯的錐形混凝土柱（照片裡幾乎與檯面同寬），
+  // 不是細鋼管。顏色偏暖的淺灰，與鋼結構分得開。
+  const concreteLeg = new THREE.MeshStandardMaterial({
+    color: 0x8b857a,
+    metalness: 0.0,
+    roughness: 0.95,
+    envMapIntensity: 0.5,
+  })
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6
     const leg = new THREE.Mesh(
-      new THREE.CylinderGeometry(R * 0.17, R * 0.21, R * 1.15, 8),
-      structure,
+      new THREE.CylinderGeometry(R * 0.36, R * 0.5, R * 1.15, 16),
+      concreteLeg,
     )
-    leg.position.set(Math.sin(a) * R * 2.15, R * 0.58, Math.cos(a) * R * 2.15)
+    leg.position.set(Math.sin(a) * R * 2.0, R * 0.58, Math.cos(a) * R * 2.0)
     olm.add(leg)
 
     const a2 = ((i + 1) / 6) * Math.PI * 2 + Math.PI / 6
@@ -88,7 +95,8 @@ function buildOLM(): THREE.Group {
 /** 方形斷面塔架：立柱 + 每層橫桿 + 交錯的斜撐。 */
 function buildTower(height: number): THREE.Group {
   const tower = new THREE.Group()
-  const structure = structureMaterial(0x555c65, 0.6)
+  // 鍍鋅鋼在戶外日光下是接近白的淺灰（參考照片裡塔架比箭體只暗一階）
+  const structure = structureMaterial(0x9199a1, 0.6)
   const half = R * 1.05
   const levels = 13
   const levelH = height / levels
@@ -163,7 +171,7 @@ interface Chopsticks {
 
 function buildChopsticks(y: number): Chopsticks {
   const group = new THREE.Group()
-  const mat = structureMaterial(0x7a828b, 0.55)
+  const mat = structureMaterial(0x8f969e, 0.55)
   const armLen = R * 3.6
   const pivots: { pivot: THREE.Group; sign: number }[] = []
 
@@ -205,7 +213,7 @@ function buildChopsticks(y: number): Chopsticks {
 /** 儲罐區（tank farm）：發射場的第二個地標，也把場景撐大。 */
 function buildTankFarm(): THREE.Group {
   const farm = new THREE.Group()
-  const tankMat = steelMaterial({ color: 0xc8cdd4, repeat: [2, 0.5], normalScale: 0.4 })
+  const tankMat = steelMaterial({ color: 0xe6e9ec, repeat: [2, 0.5], normalScale: 0.4 })
   const white = structureMaterial(0xd8dce1, 0.5)
 
   // 立式儲罐一排（LOX / CH4 / 水）
@@ -258,6 +266,7 @@ export function buildPad(): Pad {
     color: 0x3d4249,
     metalness: 0.02,
     roughness: 0.96,
+    envMapIntensity: 0.5, // 混凝土不該把天空整片吃進來
   })
 
   // 混凝土坪：加大到約 45 cm 直徑，整個發射場站在上面

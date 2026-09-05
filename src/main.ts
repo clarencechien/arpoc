@@ -19,6 +19,22 @@ const ui: UiRefs = {
 
 const app = new App($<HTMLCanvasElement>('gl'), ui)
 
+// 給 scripts/inspect.mjs 用的固定機位鉤子：把鏡頭放到指定位置並鎖住自動取景。
+// 對一般使用者無害；不放進 UI。
+declare global {
+  interface Window {
+    __orbital: {
+      view(px: number, py: number, pz: number, tx: number, ty: number, tz: number, panel?: boolean): void
+      /** 跳到指定任務秒並暫停 */
+      mission(t: number): void
+    }
+  }
+}
+window.__orbital = {
+  view: (px, py, pz, tx, ty, tz, panel = true) => app.debugView([px, py, pz], [tx, ty, tz], panel),
+  mission: (t) => app.debugMission(t),
+}
+
 // ── 能力偵測與說明文字 ────────────────────────────────
 // 降級模式不是次等公民：iOS Safari 目前沒有 WebXR AR，
 // 不做降級等於一半使用者看到白畫面（handoff §3）。
@@ -38,7 +54,9 @@ function describe(caps: Capabilities): { text: string; state: string } {
   }
   if (caps.isIOS) {
     return {
-      text: 'iOS Safari 目前沒有 WebXR AR。\n已自動改用桌面模式：同一套場景與時間軸，用手指拖曳環繞觀看。',
+      text:
+        'iOS 沒有 WebXR——Safari 沒有實作，而 iOS 上的其他瀏覽器都用同一個核心。\n' +
+        '已改用桌面模式：同一套場景與時間軸，用手指拖曳環繞觀看。',
       state: 'warn',
     }
   }

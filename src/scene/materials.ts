@@ -11,6 +11,22 @@
 
 import * as THREE from 'three'
 
+/**
+ * 貼圖的 anisotropic filtering 等級。圓柱掠射角會讓焊縫糊成 moiré，
+ * 沒有它 T1 的反射帶一轉到側面就碎掉。需要 renderer 才拿得到值，
+ * 由 app.ts 在建 renderer 之後、建場景之前注入。
+ */
+let maxAnisotropy = 1
+
+export function setMaxAnisotropy(n: number): void {
+  maxAnisotropy = Math.max(1, Math.floor(n))
+}
+
+function finishTexture<T extends THREE.Texture>(t: T): T {
+  t.anisotropy = maxAnisotropy
+  return t
+}
+
 /** 由高度圖推法線圖。邊界用環繞取樣，貼在圓柱上不會有接縫。 */
 function heightToNormal(src: HTMLCanvasElement, strength: number): THREE.CanvasTexture {
   const w = src.width
@@ -145,8 +161,34 @@ function buildSteelMaps(): SteelMaps {
   return { normal: heightToNormal(hc, 3.2), roughness }
 }
 
+// ── 環境遮蔽 ─────────────────────────────────────────────
+// 低成本、AR 關掉 shadow map 之後也吃得到的暗部：桶段兩端（接縫、裙部內側）壓暗。
+// 用 channel 0（主 UV）、repeat 固定 (1,1)，所以與 normal map 的 repeat 無關，
+// 只在幾何的頂端與底端各一道。
+
+let aoEndsMap: THREE.Texture | null = null
+
+function buildAoEndsMap(): THREE.Texture {
+  const W = 8
+  const H = 256
+  const [c, g] = blank(W, H, '#ffffff')
+  const grad = g.createLinearGradient(0, 0, 0, H)
+  grad.addColorStop(0.0, '#5a5a5a')
+  grad.addColorStop(0.07, '#ffffff')
+  grad.addColorStop(0.93, '#ffffff')
+  grad.addColorStop(1.0, '#5a5a5a')
+  g.fillStyle = grad
+  g.fillRect(0, 0, W, H)
+  const tex = new THREE.CanvasTexture(c)
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+  tex.channel = 0
+  return finishTexture(tex)
+}
+
 export interface SteelOptions {
   color?: number
+  /** 兩端環境遮蔽強度 0..1；0 或省略＝不加 */
+  ao?: number
   /** 貼圖重複次數 [繞一圈, 沿高度] */
   repeat?: [number, number]
   /** 額外壓暗粗糙度（例如格柵翼比箭體霧） */
@@ -169,6 +211,7 @@ export function steelMaterial(opts: SteelOptions = {}): THREE.MeshStandardMateri
   for (const t of [normal, roughness]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping
     t.repeat.set(ru, rv)
+    finishTexture(t)
     t.needsUpdate = true
   }
 
@@ -180,6 +223,11 @@ export function steelMaterial(opts: SteelOptions = {}): THREE.MeshStandardMateri
     normalMap: normal,
   })
   m.normalScale.setScalar(opts.normalScale ?? 0.55)
+  if (opts.ao && opts.ao > 0) {
+    if (!aoEndsMap) aoEndsMap = buildAoEndsMap()
+    m.aoMap = aoEndsMap
+    m.aoMapIntensity = opts.ao
+  }
   return m
 }
 
@@ -273,6 +321,7 @@ export function tileMaterial(repeat: [number, number]): THREE.MeshStandardMateri
   for (const t of Object.values(maps)) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping
     t.repeat.set(repeat[0], repeat[1])
+    finishTexture(t)
     t.needsUpdate = true
   }
   maps.map.colorSpace = THREE.SRGBColorSpace
@@ -288,7 +337,11 @@ export function tileMaterial(repeat: [number, number]): THREE.MeshStandardMateri
   return m
 }
 
-/** 引擎艙、格柵翼那類非外殼的深色結構件。 */
+/**
+ * 引擎艙、格柵翼、塔架那類非外殼的結構件。
+ * envMapIntensity 壓到 0.6：天空 env 是為不鏽鋼反射調的，直接全額打在這些
+ * 半霧面結構上會整片染藍；金屬外殼（steelMaterial）維持 1.0。
+ */
 export function structureMaterial(color = 0x6d747d, roughness = 0.55): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness })
+  return new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness, envMapIntensity: 0.6 })
 }

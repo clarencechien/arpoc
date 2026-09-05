@@ -18,8 +18,35 @@
    SECO → 再入 → Ship 腹部朝下滑降 → 落地翻轉 → 筷子接塔，約 80 秒
 5. Ship 接塔後定格 3 秒顯示整點（例如 `15:00`），回到待機
 
-不支援 WebXR 的裝置（例如 iOS Safari）自動進入**桌面模式**：同一套場景圖與時間軸，
+不支援 WebXR 的裝置自動進入**桌面模式**：同一套場景圖與時間軸，
 改用 OrbitControls 環繞觀看。降級模式不是次等公民。
+
+## 平台支援
+
+| 平台 | AR 模式 | 桌面模式 |
+|---|---|---|
+| Android Chrome / Edge（ARCore 裝置） | ✅ | ✅ |
+| Meta Quest Browser | ✅ | ✅ |
+| **iOS / iPadOS（所有瀏覽器）** | ❌ | ✅ |
+| Apple Vision Pro Safari | ❌ | ✅ |
+| 桌機瀏覽器 | ❌ | ✅ |
+
+### iOS 為什麼沒有 AR
+
+**Safari 完全沒有實作 WebXR Device API**——不只是 AR 模組，是整個 API 都沒有。
+而 iOS 上的 Chrome、Firefox、Edge 依 App Store 規定都用 WebKit 核心，
+所以換瀏覽器不會有幫助。截至 2026 年 8 月，Apple 未公布任何導入計畫。
+
+Vision Pro 是唯一的例外，但也只有一半：visionOS 2 的 Safari 預設開了
+`immersive-vr`，**AR 模組仍未啟用**，所以這個 `immersive-ar` 應用一樣進不去。
+
+**iOS 使用者實際會拿到什麼**：啟動頁偵測到之後會說明原因，並把「桌面模式」
+變成主要按鈕。進去之後完整 3D 場景、飛行時間軸、遙測 HUD、33 引擎環形圖、
+整點排程、音效、測試面板全部都在——少的只有相機透視畫面與 hit-test 放置，
+改成手指拖曳環繞。不是白畫面，也不是殘廢版。
+
+偵測是問 `navigator.xr.isSessionSupported('immersive-ar')`，不是 UA 白名單。
+Apple 哪天開了，「進入 AR」會自動亮起來，這邊一行都不用改。
 
 ## 開發
 
@@ -45,8 +72,14 @@ WebXR **只在 secure context 下啟動**。用區網 IP 開 `http://192.168.x.x
 npm run build && npm run preview &
 npm run smoke                          # 跑完整條時間軸並逐段截圖到 smoke-out/
 node scripts/reduced-motion-check.mjs  # 驗 prefers-reduced-motion 不播飛行動畫
-node scripts/inspect.mjs               # 拉近繞一圈，看模型輪廓與材質
+node scripts/inspect.mjs               # 固定 6 機位 contact sheet（正側／45°／引擎／格柵翼／襟翼／全景）
+node scripts/trajectory.mjs            # 固定廣角機位、逐任務秒截圖排成 strip，看弧線與姿態
 ```
+
+後兩支是**視覺對照工具**：改完材質或軌跡，直接拿 `smoke-out/contact.png` 與
+`smoke-out/trajectory.png` 跟真實照片並排比。「哪裡不對」用眼睛比對遠比用想的準——
+格柵翼被封成實心方塊、分離瞬間 Booster 跳成垂直，都是這樣抓到的。
+兩支都透過 `window.__orbital.view()` / `.mission()` 設機位與時刻，不靠拖曳。
 
 需要 Playwright 的 chromium（`npx playwright install chromium`），
 或用 `SMOKE_CHROMIUM=/path/to/chrome` 指定既有的。
@@ -76,11 +109,12 @@ src/
   sim/
     timeline.ts    事件表、變速播放的 mission↔play 對映、標籤格式化
     telemetry.ts   高度／速度的擬合曲線
-    flight.ts      任務時間 → 場景姿態（含視覺高度壓縮）
+    flight.ts      任務時間 → 場景姿態（真實座標路徑 + 只壓距離的視覺映射）
     scheduler.ts   整點排程（自我校正迴圈 + 遲到策略）
   scene/
     rocket.ts      程序化 Starship V3 / Super Heavy V3
-    materials.ts   程序化貼圖（焊縫、板材、六角隔熱瓦）
+    materials.ts   程序化貼圖（焊縫、板材、六角隔熱瓦、AO）
+    sky.ts         給 PMREM 的程序化天空（亮天／暗地／硬邊地平線／太陽）
     pad.ts         發射台與塔架
     effects.ts     尾焰 shader、塵埃環、火花粒子池
     world.ts       場景組裝與每幀套用
@@ -107,20 +141,41 @@ anchor 是不是被 hit-test 放到地板上。
 canvas 2D 沒有 `font-variant-numeric`，所以 `hud/panel.ts` 的 `drawTabular()`
 把每個字元畫進以 `'0'` 寬度為準的固定格子裡，不依賴字體自帶 tabular figures。
 
-**表面細節靠貼圖，不靠面數。**
-`scene/materials.ts` 在啟動時畫幾張 canvas，轉成 normal / roughness map：
-環焊縫、桶段接縫、板材起伏、六角隔熱瓦都在貼圖裡。
-一根沒有貼圖的圓柱在任何角度都只有一條漸層，大腦立刻認出那是原始幾何——
-「看起來假」多半是這個原因，不是輪廓不夠細。面數留給輪廓。
+**不鏽鋼的長相由環境貼圖決定，不是燈光。**
+外殼 `metalness 0.92`，diffuse 幾乎為零，三盞燈對它幾乎沒有貢獻——整艘船的樣子
+是 `scene.environment` 單獨決定的。原本用 three 的 `RoomEnvironment`（攝影棚方盒）
+再壓到 0.55，反射出來一片均勻的灰，就是「灰色塑膠圓柱」。
+`scene/sky.ts` 換成亮天空／暗地面／**硬邊地平線**／過曝太陽：那條沿著圓柱滑動的
+分界線才是不鏽鋼的視覺簽名。地平線刻意放在 v=0.56（鏡頭永遠在 60 cm 模型上方
+往下看，反射到的是略低於水平那一帶；真實照片是從地面往上拍），env 再傾 0.28 rad
+讓箭體一側映天、一側映地。升空時傾角隨高度變化，反射的地平線會跟著翻。
+
+**表面細節靠貼圖，不靠面數；但邊緣要有倒角。**
+`scene/materials.ts` 在啟動時畫幾張 canvas，轉成 normal / roughness / ao map：
+環焊縫、桶段接縫、板材起伏、六角隔熱瓦、桶段兩端的遮蔽都在貼圖裡。
+圓周 96 段，接合處用 `LatheGeometry` 加極窄 chamfer——真實世界沒有數學銳邊，
+每條邊都有一線高光。金屬 base color 用接近中性的亮灰 `0xe4e7ea`：對金屬而言
+color 是乘進反射的，暗色等於把環境再調暗一次。
+
+**有真實陰影，AR 掉幀時退回 AO。**
+key light 投 2048 的 shadow map，frustum 收緊到載具並每幀跟著載具走；
+箭體自我遮蔽（襟翼在箭體上有投影、格柵翼格子裡有暗部）。
+AR 模式量到滑動平均 < 30 fps 持續 2 秒就關陰影、只關不開，aoMap 留著讓凹處仍是暗的。
+這是專案裡唯一為 AR 開的特例，且只關效能。
 
 **AR 模式會用現場光照。**
 裝置支援 `light-estimation` 時，棚拍光整組換成 WebXR 估計出的方向光與
 反射環境貼圖，不鏽鋼會反射真實房間。AR 裡最容易「看起來是貼上去的」
 原因不是模型不夠細，是光對不上。不支援就沿用棚拍光。
 
-**視覺高度是壓縮過的。**
-真實 152 km 換算 1:200 也有 760 公尺。`flight.ts` 用一條飽和曲線把它壓進
-1.25 公尺的錐形範圍，再靠縮小與淡出暗示距離。
+**軌跡先在真實座標鋪好，最後才壓縮——而且只壓距離、不壓方向。**
+`flight.ts` 用公開資料的錨點（下靶場 km、高度 km）鋪出連續路徑
+（非均勻 Catmull-Rom，不會在錨點停頓），機頭沿速度向量，Booster 分離後
+照真實時序翻身。映射到場景時 `visual = dir × A·ln(1 + r/K)`：
+地面觀察者看到的是角度，方向保留就等於弧線形狀是對的，只是拉近了；
+Booster apogee（r ≈ 115 km）落在 1.45 m。遠了就縮小，賣距離感。
+原本「高度與下靶場各自套飽和曲線、傾角另外手調」三者互不相干，機頭不對飛行方向，
+那是「看起來假」的根源。
 
 **桌面模式會自動取景。**
 AR 裡是使用者自己抬頭，桌面模式沒有這個動作，所以鏡頭隨高度後退並抬高目標點，
@@ -180,6 +235,57 @@ window 的 `rAF` 在背景分頁會停掉。
 
 已勾選的項目在無頭 Chromium 上驗過（`npm run smoke`）；
 其餘需要真實裝置與相機，無法在 CI 裡驗證。
+
+iOS 那一條要驗的不是 AR（那確定沒有），而是**偵測邏輯有沒有正確認出 iOS
+並給出對的文案**。iPadOS 的偵測靠
+`navigator.platform === 'MacIntel' && maxTouchPoints > 1`，這個手法一向脆弱，
+實機看一眼最快。
+
+## TODO
+
+### 待實機驗證（做不到，需要真的手機）
+
+- [ ] Android Chrome：AR 全流程與幀率（目標 ≥ 30 fps）。目前完全沒量過，
+      新增的儲罐區、塔架斜撐、程序化貼圖都還沒在行動 GPU 上跑過
+- [ ] `light-estimation` 實際效果——支援與否、環境貼圖有沒有真的反射房間
+- [ ] AR 尺度感：1:200 的 60 cm 在真實房間裡是不是舒服的大小
+- [ ] HUD 面板在白牆與雜亂背景前的可讀性
+- [ ] wake lock、背景分頁五分鐘後回來的整點準時性
+- [ ] iPadOS 的偵測（見上）
+
+### 已知限制（接受，不打算修）
+
+- **iOS 沒有 AR**。三條替代路（陀螺儀＋相機透視偽 AR、AR Quick Look USDZ、
+  8th Wall 之類的商用 SDK）都評估過，決定不做：偽 AR 沒有平面追蹤走動就穿幫，
+  USDZ 只剩模型沒有時鐘，商用 SDK 與「零第三方授權風險 + 純靜態部署」衝突
+- **場景只有一座塔**，Booster 與 Ship 共用。真實計畫是二號塔接 Ship
+- **遙測面板顯示 Ship 的數值**，包含 Booster 返場那一段（比照真實轉播主讀數）
+- **格柵翼的格子板厚被放大到 R×0.075**，否則 60 cm 尺度下是次像素；靠輪廓在讀
+- **AR 的陰影是有條件的**：< 30 fps 持續 2 秒就關、只關不開，之後只剩 aoMap 的暗部
+- **軌跡的下靶場距離是推算值**：公開資料只有高度／速度／事件時間，下靶場由速度與
+  路徑角倒推（MECO 約 46 km、路徑角 26°，與 apogee 90 km 一致），不是遙測
+- 字體走 Google Fonts CDN，載入失敗會退回系統窄體（版面不會壞，
+  數字等寬是自己畫格子做的，不依賴字體）
+
+### 隨真實飛行更新
+
+- **Ship 接塔是預測剖面**，不是已發生的事。Flight 13（2026-07-24）完成垂直
+  濺落驗證，Flight 14 預定首次接塔。真的飛了之後，`sim/timeline.ts` 的
+  `EVENTS` 與 `sim/flight.ts` 的返場曲線應該換成實際轉播時間
+- 上升段仍照 Flight 6（V1）的時間軸，載具卻是 V3。若 SpaceX 公布 V3 的
+  完整任務時間軸，整張表可以換掉
+- 軌跡錨點在 `sim/flight.ts` 的 `STACK_PATH` / `BOOSTER_PATH` / `SHIP_*_PATH`，
+  格式是 `[任務秒, 下靶場 km, 高度 km]`。有更好的資料（例如從轉播 OCR 出來的
+  遙測）直接換錨點就好，映射與姿態都會跟著對
+
+### 可能的下一步（沒人要求，只是記著）
+
+- **M6 資產替換**：`scene/rocket.ts` 的介面已經預留好（booster / ship 各自
+  獨立 Group、原點在底部中心），要換 GLB 不用動其他檔案
+- 音效目前是合成的方波與棕噪音，可以做得更有層次（分離的爆震、風噪）
+- 桌面模式的自動取景在 Ship 再入段還是偏遠，可以再分一段
+- 排程只支援整點；若要「每半小時」之類的，`HourlyScheduler` 的
+  `computeNextMark` 是唯一要改的地方
 
 ## 測試入口
 
