@@ -50,6 +50,8 @@ export interface World {
   setEnvironment(renderer: THREE.WebGLRenderer): void
   /** 必須在任何 XR session 開始之前呼叫；裝置支援的話改用現場光照 */
   enableLightEstimation(renderer: THREE.WebGLRenderer): void
+  /** 開關 shadow map（AR 掉幀時的 fallback）。會讓所有材質重新編譯，不要每幀呼叫。 */
+  setShadows(renderer: THREE.WebGLRenderer, on: boolean): void
 }
 
 export function createWorld(): World {
@@ -65,6 +67,22 @@ export function createWorld(): World {
   studioLights.add(hemi, key, fill)
   scene.add(studioLights)
 
+  // 只有 key light 投影。shadow camera 收緊到載具 bounding box——
+  // 2048 的解析度要全部花在火箭上，範圍給大就浪費掉了。
+  // 位置與 target 在 applyFlight 裡每幀跟著載具走。
+  key.castShadow = true
+  key.shadow.mapSize.set(2048, 2048)
+  key.shadow.camera.left = -0.34
+  key.shadow.camera.right = 0.34
+  key.shadow.camera.top = 0.48
+  key.shadow.camera.bottom = -0.42
+  key.shadow.camera.near = 0.4
+  key.shadow.camera.far = 6
+  key.shadow.bias = -0.00035
+  key.shadow.normalBias = 0.012 // 細圓柱與薄板最容易出 shadow acne，這個比 bias 有效
+  scene.add(key.target)
+  const shadowTarget = new THREE.Vector3()
+
   const anchor = new THREE.Group()
   anchor.name = 'launchSite'
   anchor.visible = false
@@ -79,6 +97,20 @@ export function createWorld(): World {
   stack.position.y = padDeckY
   stack.add(booster, ship)
   anchor.add(stack)
+
+  // 箭體、襟翼、格柵翼、塔架都投影；箭體自己與發射台也接影（自我遮蔽是重點）。
+  // 必須在尾焰、光暈這些 additive 透明物件被 add 進來**之前**做，
+  // 否則 traverse 會讓火焰投出一塊黑影。
+  const setShadowFlags = (root: THREE.Object3D) =>
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    })
+  setShadowFlags(booster)
+  setShadowFlags(ship)
+  setShadowFlags(pad.group)
 
   // 接觸陰影：比 shadow map 便宜得多，AR 裡的作用就是把物件「黏」在地板上
   const shadow = new THREE.Mesh(
@@ -195,6 +227,18 @@ export function createWorld(): World {
 
     pad.setChopsticks(f.chopsticks)
 
+    // shadow camera 跟著載具：Booster 還在（含掛在塔上）就跟 Booster，
+    // 否則跟 Ship（再入返場那段）。光源沿太陽方向退 2.8 m，frustum 相對光源固定。
+    const followBooster = f.booster.visible && f.booster.opacity > 0.5
+    shadowTarget.set(
+      followBooster ? f.booster.x : f.ship.x,
+      (followBooster ? f.booster.y : f.ship.y) + BOOSTER_HEIGHT * 0.45,
+      0,
+    )
+    stack.localToWorld(shadowTarget)
+    key.target.position.copy(shadowTarget)
+    key.position.copy(shadowTarget).addScaledVector(SUN_DIRECTION, 2.8)
+
     // 升空時讓反射的地平線跟著慢慢傾斜——鏡面上那條分界線動起來的瞬間
     // 說服力很高，而且只是一個 Euler 分量，零成本。
     const climb = Math.min(1, Math.max(f.booster.y, f.ship.y - BOOSTER_HEIGHT) / 1.2)
@@ -301,6 +345,18 @@ export function createWorld(): World {
           scene.environmentIntensity = SKY_ENV_INTENSITY
           studioEnv = null
         }
+      })
+    },
+    setShadows(renderer: THREE.WebGLRenderer, on: boolean) {
+      if (renderer.shadowMap.enabled === on) return
+      renderer.shadowMap.enabled = on
+      key.castShadow = on
+      // shadowMap.enabled 改了之後 shader 要重編，three 不會自動做
+      scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const m of mats) m.needsUpdate = true
       })
     },
     setEnvironment(renderer: THREE.WebGLRenderer) {

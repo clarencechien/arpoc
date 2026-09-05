@@ -92,6 +92,11 @@ export class App {
   private lastFrameMs = 0
   private lastPanelDraw = 0
 
+  /** AR 幀率監看：滑動平均低於門檻持續一段時間就關陰影（僅 AR，明確標註的效能 fallback） */
+  private fpsAvg = 60
+  private lowFpsSince = 0
+  private shadowsOn = true
+
   private readonly reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
@@ -108,6 +113,10 @@ export class App {
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
+    // 真實陰影是 CG 感的第二大來源（第一是環境貼圖）：襟翼在箭體上要有投影、
+    // 格柵翼格子裡要有暗部。AR 掉幀時由 monitorFps() 關掉，改吃 aoMap。
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.1
@@ -346,7 +355,10 @@ export class App {
     this.lastFrameMs = timeMs
     const elapsed = timeMs / 1000
 
-    if (this.ar.active) this.ar.updateHitTest(xrFrame ?? null)
+    if (this.ar.active) {
+      this.ar.updateHitTest(xrFrame ?? null)
+      this.monitorFps(dt, timeMs)
+    }
     this.controls?.update()
 
     if (this.state === 'playing') this.advance(dt)
@@ -371,6 +383,28 @@ export class App {
     }
 
     this.renderer.render(this.world.scene, this.camera)
+  }
+
+  /**
+   * 【AR 專用效能 fallback】shadow map 在行動 GPU 上不便宜。
+   * 進 AR 後量滑動平均幀率，低於 30 fps 持續 2 秒就關掉陰影（aoMap 仍在，
+   * 凹處還是暗的）。只關不開：抖動地開關陰影比一直沒有陰影更糟。
+   * 桌面模式不走這裡——桌面不是效能瓶頸所在，也沒有 30 fps 的硬目標。
+   */
+  private monitorFps(dt: number, nowMs: number): void {
+    if (!this.shadowsOn || dt <= 0) return
+    const fps = 1 / dt
+    this.fpsAvg += (fps - this.fpsAvg) * 0.08
+    if (this.fpsAvg >= 30) {
+      this.lowFpsSince = 0
+      return
+    }
+    if (this.lowFpsSince === 0) this.lowFpsSince = nowMs
+    if (nowMs - this.lowFpsSince > 2000) {
+      this.shadowsOn = false
+      this.world.setShadows(this.renderer, false)
+      this.setStatus('幀率不足，已關閉陰影以維持流暢。', 'idle')
+    }
   }
 
   /**

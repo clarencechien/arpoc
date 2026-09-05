@@ -193,7 +193,7 @@ function buildBooster(): THREE.Group {
   // 引擎裙：外徑略大、顏色略深，是箭體最下面那一圈
   const skirt = new THREE.Mesh(
     new THREE.CylinderGeometry(R * 1.008, R * 1.012, skirtH, RADIAL, 1),
-    steelMaterial({ color: 0x9198a0, repeat: [2, 0.35], normalScale: 0.8 }),
+    steelMaterial({ color: 0x9198a0, repeat: [2, 0.35], normalScale: 0.8, ao: 0.9 }),
   )
   skirt.position.y = skirtH / 2
   group.add(skirt)
@@ -202,7 +202,7 @@ function buildBooster(): THREE.Group {
   // 主箭體
   const barrel = new THREE.Mesh(
     new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1),
-    steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.35] }),
+    steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.35], ao: 0.55 }),
   )
   barrel.position.y = barrelY0 + barrelH / 2
   group.add(barrel)
@@ -355,7 +355,7 @@ function buildShip(): { group: THREE.Group } {
   const barrelY1 = H - noseH
   const barrelH = barrelY1 - barrelY0
 
-  const skinMat = track(steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.0] }))
+  const skinMat = track(steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.0], ao: 0.55 }))
   const noseMat = track(steelMaterial({ color: 0xbcc3cb, repeat: [2, 0.55], normalScale: 0.4 }))
   const tileSkin = track(tileMaterial([2.6, 4.5]))
   const tileNose = track(tileMaterial([2.6, 1.7]))
@@ -363,7 +363,7 @@ function buildShip(): { group: THREE.Group } {
 
   const skirt = new THREE.Mesh(
     new THREE.CylinderGeometry(R * 1.006, R * 1.01, skirtH, RADIAL, 1),
-    track(steelMaterial({ color: 0x959ca4, repeat: [2, 0.3], normalScale: 0.8 })),
+    track(steelMaterial({ color: 0x959ca4, repeat: [2, 0.3], normalScale: 0.8, ao: 0.9 })),
   )
   skirt.position.y = skirtH / 2
   group.add(skirt)

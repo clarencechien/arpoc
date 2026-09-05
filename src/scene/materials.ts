@@ -145,8 +145,34 @@ function buildSteelMaps(): SteelMaps {
   return { normal: heightToNormal(hc, 3.2), roughness }
 }
 
+// ── 環境遮蔽 ─────────────────────────────────────────────
+// 低成本、AR 關掉 shadow map 之後也吃得到的暗部：桶段兩端（接縫、裙部內側）壓暗。
+// 用 channel 0（主 UV）、repeat 固定 (1,1)，所以與 normal map 的 repeat 無關，
+// 只在幾何的頂端與底端各一道。
+
+let aoEndsMap: THREE.Texture | null = null
+
+function buildAoEndsMap(): THREE.Texture {
+  const W = 8
+  const H = 256
+  const [c, g] = blank(W, H, '#ffffff')
+  const grad = g.createLinearGradient(0, 0, 0, H)
+  grad.addColorStop(0.0, '#5a5a5a')
+  grad.addColorStop(0.07, '#ffffff')
+  grad.addColorStop(0.93, '#ffffff')
+  grad.addColorStop(1.0, '#5a5a5a')
+  g.fillStyle = grad
+  g.fillRect(0, 0, W, H)
+  const tex = new THREE.CanvasTexture(c)
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+  tex.channel = 0
+  return tex
+}
+
 export interface SteelOptions {
   color?: number
+  /** 兩端環境遮蔽強度 0..1；0 或省略＝不加 */
+  ao?: number
   /** 貼圖重複次數 [繞一圈, 沿高度] */
   repeat?: [number, number]
   /** 額外壓暗粗糙度（例如格柵翼比箭體霧） */
@@ -180,6 +206,11 @@ export function steelMaterial(opts: SteelOptions = {}): THREE.MeshStandardMateri
     normalMap: normal,
   })
   m.normalScale.setScalar(opts.normalScale ?? 0.55)
+  if (opts.ao && opts.ao > 0) {
+    if (!aoEndsMap) aoEndsMap = buildAoEndsMap()
+    m.aoMap = aoEndsMap
+    m.aoMapIntensity = opts.ao
+  }
   return m
 }
 
