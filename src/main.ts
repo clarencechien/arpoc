@@ -25,11 +25,14 @@ declare global {
   interface Window {
     __orbital: {
       view(px: number, py: number, pz: number, tx: number, ty: number, tz: number, panel?: boolean): void
+      /** 跳到指定任務秒並暫停 */
+      mission(t: number): void
     }
   }
 }
 window.__orbital = {
   view: (px, py, pz, tx, ty, tz, panel = true) => app.debugView([px, py, pz], [tx, ty, tz], panel),
+  mission: (t) => app.debugMission(t),
 }
 
 // ── 能力偵測與說明文字 ────────────────────────────────

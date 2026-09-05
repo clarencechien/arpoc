@@ -30,6 +30,7 @@ import {
   eventAt,
   eventsBetween,
   formatMissionTime,
+  missionToPlay,
   playToMission,
   T,
 } from './sim/timeline'
@@ -48,7 +49,7 @@ function staticFlight(mission: number): FlightState {
   const f = flightStateAt(mission)
   return {
     ...f,
-    booster: { x: 0, y: 0, tilt: 0, visible: true, opacity: 1 },
+    booster: { x: 0, y: 0, tilt: 0, scale: 1, visible: true, opacity: 1 },
     ship: {
       x: 0,
       y: BOOSTER_HEIGHT,
@@ -438,6 +439,11 @@ export class App {
     this.world.panel.setOpacity(panel ? 1 : 0)
   }
 
+  /** 直接跳到指定任務秒並暫停（scripts/trajectory.mjs 逐時刻截圖用）。 */
+  debugMission(mission: number): void {
+    this.scrubTo(missionToPlay(mission) / PLAY_DURATION)
+  }
+
   private frameVehicle(flight: FlightState, dt: number): void {
     const c = this.controls
     if (!c || !c.enabled || this.renderer.xr.isPresenting || this.cameraLocked) return
@@ -454,7 +460,7 @@ export class App {
       subject = flight.ship.y
     }
     const climb = Math.min(1, subject / VIS_CEILING)
-    const k = 1 - Math.exp(-dt * 1.6) // 與幀率無關的平滑
+    const k = 1 - Math.exp(-dt * 2.4) // 與幀率無關的平滑；26× 段載具移動快，追焦要跟得上
 
     c.target.y += (0.26 + 0.52 * climb - c.target.y) * k
 

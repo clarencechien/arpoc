@@ -208,6 +208,7 @@ export function createWorld(): World {
     booster.visible = f.booster.visible && f.booster.opacity > 0.01
     booster.position.set(f.booster.x, f.booster.y, 0)
     booster.rotation.set(0, 0, f.booster.tilt)
+    booster.scale.setScalar(f.booster.scale) // 壓縮空間裡靠縮小賣距離感
     fadeMaterials(boosterMaterials, f.booster.opacity)
 
     ship.visible = f.ship.opacity > 0.01
@@ -290,6 +291,7 @@ export function createWorld(): World {
       booster.visible = true
       booster.position.set(0, 0, 0)
       booster.rotation.set(0, 0, 0)
+      booster.scale.setScalar(1)
       ship.visible = true
       ship.position.set(0, BOOSTER_HEIGHT, 0)
       ship.quaternion.identity()
