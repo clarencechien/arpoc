@@ -21,7 +21,12 @@ import { steelMaterial, structureMaterial, tileMaterial } from './materials'
 import { BODY_RADIUS, BOOSTER_HEIGHT, SHIP_HEIGHT } from '../sim/flight'
 
 const R = BODY_RADIUS
-const RADIAL = 32
+/**
+ * 圓周分段。AR 裡使用者會走到 30 cm 內看，32 段在輪廓上看得出多邊形；
+ * 更嚴重的是環境反射會沿著每個面切一刀，分段的反射帶比輪廓破綻更明顯。
+ * 圓柱很便宜，這裡不是效能瓶頸（真正該省的是格柵翼那些 instanced 板）。
+ */
+const RADIAL = 96
 
 /** 33 具 Raptor 的實際排列：中央 3 / 中環 10 / 外環 20。 */
 export const BOOSTER_ENGINE_RINGS = [
@@ -112,6 +117,32 @@ function makeEngines(
   return group
 }
 
+/**
+ * 有倒角的桶段。真實世界沒有數學上的銳邊——每個接合處（裙↔桶、桶↔熱分離段）
+ * 的邊緣都必有一條高光，那條高光就是「這是實物」的線索之一。
+ * 用 LatheGeometry 在兩端各加一圈極窄的 chamfer（半徑差約 0.6%），
+ * computeVertexNormals 會把邊緣法線平均掉，反射帶在邊緣自然收圓。
+ *
+ * 原點在底部中心、往 +Y 長 h。UV 的 v 重寫成沿高度線性，
+ * 否則 Lathe 依點數分配 v，焊縫貼圖會被擠到兩端。
+ */
+function bodySection(rBottom: number, rTop: number, h: number): THREE.LatheGeometry {
+  const c = h * 0.004 // 倒角高度
+  const inset = 0.006 // 倒角半徑內縮比例
+  const pts = [
+    new THREE.Vector2(rBottom * (1 - inset), 0),
+    new THREE.Vector2(rBottom, c),
+    new THREE.Vector2(rTop, h - c),
+    new THREE.Vector2(rTop * (1 - inset), h),
+  ]
+  const geo = new THREE.LatheGeometry(pts, RADIAL)
+  const pos = geo.attributes.position
+  const uv = geo.attributes.uv
+  for (let i = 0; i < pos.count; i++) uv.setY(i, pos.getY(i) / h)
+  uv.needsUpdate = true
+  return geo
+}
+
 /** 引擎艙頂板，擋住從側面看進箭體內部的視線。 */
 function bayPlate(radius: number, y: number): THREE.Mesh {
   const geo = new THREE.CircleGeometry(radius, RADIAL)
@@ -158,19 +189,17 @@ function makeGridFin(width: number, height: number, chord: number): THREE.Group 
   }
   zPlates.instanceMatrix.needsUpdate = true
 
-  // 外框比格子厚，撐出輪廓
+  // 外框：只有四周的直立框板，**沒有上下蓋板**。格子的開口軸是 Y（氣流方向），
+  // 上下一封就變成實心方塊——第一張 contact sheet 抓到的正是這個。
   const frame = new THREE.Group()
-  for (const [sx, sy] of [
-    [0, 1],
-    [0, -1],
-  ] as const) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(width * 1.04, height * 0.09, chord * 1.02), mat)
-    bar.position.set(sx, (sy * height) / 2, 0)
+  for (const sx of [-1, 1]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(wall * 2.2, height * 1.02, chord * 1.02), mat)
+    bar.position.set((sx * width) / 2, 0, 0)
     frame.add(bar)
   }
-  for (const sx of [-1, 1]) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(width * 0.05, height * 1.02, chord * 1.02), mat)
-    bar.position.set((sx * width) / 2, 0, 0)
+  for (const sz of [-1, 1]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(width * 1.02, height * 1.02, wall * 2.2), mat)
+    bar.position.set(0, 0, (sz * chord) / 2)
     frame.add(bar)
   }
 
@@ -192,27 +221,26 @@ function buildBooster(): THREE.Group {
 
   // 引擎裙：外徑略大、顏色略深，是箭體最下面那一圈
   const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(R * 1.008, R * 1.012, skirtH, RADIAL, 1),
+    bodySection(R * 1.012, R * 1.008, skirtH),
     steelMaterial({ color: 0x9198a0, repeat: [2, 0.35], normalScale: 0.8, ao: 0.9 }),
   )
-  skirt.position.y = skirtH / 2
   group.add(skirt)
   group.add(bayPlate(R * 0.99, skirtH * 0.35))
 
   // 主箭體
   const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1),
+    bodySection(R, R, barrelH),
     steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.35], ao: 0.55 }),
   )
-  barrel.position.y = barrelY0 + barrelH / 2
+  barrel.position.y = barrelY0
   group.add(barrel)
 
   // 熱分離段：略微外擴的短段 + 一圈排氣開口。V3 起這一段不拋離。
   const hotStage = new THREE.Mesh(
-    new THREE.CylinderGeometry(R * 1.015, R * 1.0, hotStageH, RADIAL, 1, true),
+    bodySection(R * 1.0, R * 1.015, hotStageH),
     steelMaterial({ color: 0x8f959d, repeat: [2, 0.3], roughnessScale: 1.25 }),
   )
-  hotStage.position.y = barrelY1 + hotStageH / 2
+  hotStage.position.y = barrelY1
   group.add(hotStage)
 
   const ventGeo = new THREE.BoxGeometry(R * 0.16, hotStageH * 0.52, R * 0.05)
@@ -315,7 +343,14 @@ function makeFlap(
   shape.lineTo(span, tip / 2 - span * 0.12)
   shape.lineTo(0, root / 2)
   shape.closePath()
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: R * 0.16, bevelEnabled: false })
+  // 外緣加小倒角：襟翼邊緣在側逆光下會有一條細高光，沒有它就是一片紙板
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: R * 0.16,
+    bevelEnabled: true,
+    bevelThickness: R * 0.018,
+    bevelSize: R * 0.018,
+    bevelSegments: 2,
+  })
   // shape 的 x＝翼展、y＝弦長、擠出方向＝厚度。
   // 繞 Y 轉 -90° 之後：翼展→+Z（徑向朝外）、弦長→Y（箭體軸向）、厚度→X（切線向）。
   geo.rotateY(-Math.PI / 2)
@@ -362,18 +397,14 @@ function buildShip(): { group: THREE.Group } {
   const flapMat = track(tileMaterial([1.1, 0.8]))
 
   const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(R * 1.006, R * 1.01, skirtH, RADIAL, 1),
+    bodySection(R * 1.01, R * 1.006, skirtH),
     track(steelMaterial({ color: 0x959ca4, repeat: [2, 0.3], normalScale: 0.8, ao: 0.9 })),
   )
-  skirt.position.y = skirtH / 2
   group.add(skirt)
   group.add(bayPlate(R * 0.99, skirtH * 0.4))
 
-  const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(R, R, barrelH, RADIAL, 1),
-    skinMat,
-  )
-  barrel.position.y = barrelY0 + barrelH / 2
+  const barrel = new THREE.Mesh(bodySection(R, R, barrelH), skinMat)
+  barrel.position.y = barrelY0
   group.add(barrel)
 
   const nosePts = noseProfile(barrelY1, noseH, R, 18)

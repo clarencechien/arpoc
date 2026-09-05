@@ -61,14 +61,21 @@ function buildOLM(): THREE.Group {
   clamps.instanceMatrix.needsUpdate = true
   olm.add(clamps)
 
-  // 六支腿 + 斜撐
+  // 六支腿：真實 OLM 的腿是粗壯的錐形混凝土柱（照片裡幾乎與檯面同寬），
+  // 不是細鋼管。顏色偏暖的淺灰，與鋼結構分得開。
+  const concreteLeg = new THREE.MeshStandardMaterial({
+    color: 0x8b857a,
+    metalness: 0.0,
+    roughness: 0.95,
+    envMapIntensity: 0.5,
+  })
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6
     const leg = new THREE.Mesh(
-      new THREE.CylinderGeometry(R * 0.17, R * 0.21, R * 1.15, 8),
-      structure,
+      new THREE.CylinderGeometry(R * 0.36, R * 0.5, R * 1.15, 16),
+      concreteLeg,
     )
-    leg.position.set(Math.sin(a) * R * 2.15, R * 0.58, Math.cos(a) * R * 2.15)
+    leg.position.set(Math.sin(a) * R * 2.0, R * 0.58, Math.cos(a) * R * 2.0)
     olm.add(leg)
 
     const a2 = ((i + 1) / 6) * Math.PI * 2 + Math.PI / 6
