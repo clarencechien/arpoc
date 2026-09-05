@@ -11,6 +11,22 @@
 
 import * as THREE from 'three'
 
+/**
+ * 貼圖的 anisotropic filtering 等級。圓柱掠射角會讓焊縫糊成 moiré，
+ * 沒有它 T1 的反射帶一轉到側面就碎掉。需要 renderer 才拿得到值，
+ * 由 app.ts 在建 renderer 之後、建場景之前注入。
+ */
+let maxAnisotropy = 1
+
+export function setMaxAnisotropy(n: number): void {
+  maxAnisotropy = Math.max(1, Math.floor(n))
+}
+
+function finishTexture<T extends THREE.Texture>(t: T): T {
+  t.anisotropy = maxAnisotropy
+  return t
+}
+
 /** 由高度圖推法線圖。邊界用環繞取樣，貼在圓柱上不會有接縫。 */
 function heightToNormal(src: HTMLCanvasElement, strength: number): THREE.CanvasTexture {
   const w = src.width
@@ -166,7 +182,7 @@ function buildAoEndsMap(): THREE.Texture {
   const tex = new THREE.CanvasTexture(c)
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
   tex.channel = 0
-  return tex
+  return finishTexture(tex)
 }
 
 export interface SteelOptions {
@@ -195,6 +211,7 @@ export function steelMaterial(opts: SteelOptions = {}): THREE.MeshStandardMateri
   for (const t of [normal, roughness]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping
     t.repeat.set(ru, rv)
+    finishTexture(t)
     t.needsUpdate = true
   }
 
@@ -304,6 +321,7 @@ export function tileMaterial(repeat: [number, number]): THREE.MeshStandardMateri
   for (const t of Object.values(maps)) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping
     t.repeat.set(repeat[0], repeat[1])
+    finishTexture(t)
     t.needsUpdate = true
   }
   maps.map.colorSpace = THREE.SRGBColorSpace

@@ -20,7 +20,7 @@ function box(w: number, h: number, d: number, mat: THREE.Material): THREE.Mesh {
 
 function buildOLM(): THREE.Group {
   const olm = new THREE.Group()
-  const structure = structureMaterial(0x5c636c, 0.62)
+  const structure = structureMaterial(0x6f767e, 0.62)
   const dark = structureMaterial(0x2a2e33, 0.85)
 
   // 六邊形檯面
@@ -95,7 +95,8 @@ function buildOLM(): THREE.Group {
 /** 方形斷面塔架：立柱 + 每層橫桿 + 交錯的斜撐。 */
 function buildTower(height: number): THREE.Group {
   const tower = new THREE.Group()
-  const structure = structureMaterial(0x555c65, 0.6)
+  // 鍍鋅鋼在戶外日光下是接近白的淺灰（參考照片裡塔架比箭體只暗一階）
+  const structure = structureMaterial(0x9199a1, 0.6)
   const half = R * 1.05
   const levels = 13
   const levelH = height / levels
@@ -170,7 +171,7 @@ interface Chopsticks {
 
 function buildChopsticks(y: number): Chopsticks {
   const group = new THREE.Group()
-  const mat = structureMaterial(0x7a828b, 0.55)
+  const mat = structureMaterial(0x8f969e, 0.55)
   const armLen = R * 3.6
   const pivots: { pivot: THREE.Group; sign: number }[] = []
 
@@ -212,7 +213,7 @@ function buildChopsticks(y: number): Chopsticks {
 /** 儲罐區（tank farm）：發射場的第二個地標，也把場景撐大。 */
 function buildTankFarm(): THREE.Group {
   const farm = new THREE.Group()
-  const tankMat = steelMaterial({ color: 0xc8cdd4, repeat: [2, 0.5], normalScale: 0.4 })
+  const tankMat = steelMaterial({ color: 0xe6e9ec, repeat: [2, 0.5], normalScale: 0.4 })
   const white = structureMaterial(0xd8dce1, 0.5)
 
   // 立式儲罐一排（LOX / CH4 / 水）

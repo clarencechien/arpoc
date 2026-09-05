@@ -12,6 +12,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createWorld, type World } from './scene/world'
+import { setMaxAnisotropy } from './scene/materials'
 import {
   BOOSTER_HEIGHT,
   STACK_HEIGHT,
@@ -122,10 +123,14 @@ export class App {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.1
+    // T4 把金屬 base color 提亮後整體偏亮，在這裡收曝光，不要把顏色調回去
+    this.renderer.toneMappingExposure = 1.0
 
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.01, 40)
     this.camera.position.set(0.32, 0.52, 1.42)
+
+    // 貼圖 anisotropy 要在建場景（第一次生成貼圖）之前注入
+    setMaxAnisotropy(this.renderer.capabilities.getMaxAnisotropy())
 
     this.world = createWorld()
     this.world.setEnvironment(this.renderer)

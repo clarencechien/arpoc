@@ -50,6 +50,9 @@ const WINDWARD_CENTER = 1.85
 /** 單邊弧度；總覆蓋約 117°，與真實隔熱瓦的包覆範圍相當 */
 const WINDWARD_HALF = 1.02
 
+/** 304 不鏽鋼的 base color：接近中性亮灰。原本 0xb4bbc3 等於把環境再調暗 28%。 */
+const STEEL_ALBEDO = 0xe4e7ea
+
 export interface RocketParts {
   booster: THREE.Group
   ship: THREE.Group
@@ -160,7 +163,7 @@ function bayPlate(radius: number, y: number): THREE.Mesh {
  */
 function makeGridFin(width: number, height: number, chord: number): THREE.Group {
   const fin = new THREE.Group()
-  const mat = structureMaterial(0x8c939b, 0.62)
+  const mat = structureMaterial(0xaab1b8, 0.62)
   // 格板厚度要撐得住 60 cm 尺度下的取樣，太薄會糊成一塊實心方塊
   const wall = R * 0.075
 
@@ -220,17 +223,27 @@ function buildBooster(): THREE.Group {
   const barrelH = barrelY1 - barrelY0
 
   // 引擎裙：外徑略大、顏色略深，是箭體最下面那一圈
+  // 引擎裙：真實照片裡這一圈幾乎是黑的（積碳 + 隔熱層 + 永遠在自己的陰影裡），
+  // 與亮銀的箭體形成整艘船最強的明暗對比之一
   const skirt = new THREE.Mesh(
     bodySection(R * 1.012, R * 1.008, skirtH),
-    steelMaterial({ color: 0x9198a0, repeat: [2, 0.35], normalScale: 0.8, ao: 0.9 }),
+    steelMaterial({
+      color: 0x33373c,
+      repeat: [2, 0.35],
+      normalScale: 0.8,
+      ao: 0.9,
+      roughnessScale: 1.7,
+      metalness: 0.7,
+    }),
   )
   group.add(skirt)
   group.add(bayPlate(R * 0.99, skirtH * 0.35))
 
-  // 主箭體
+  // 主箭體。304 不鏽鋼接近中性亮灰：對金屬而言 color 是乘進反射的，
+  // 明暗變化交給 roughnessMap 與環境，不要用 base color 壓暗。
   const barrel = new THREE.Mesh(
     bodySection(R, R, barrelH),
-    steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.35], ao: 0.55 }),
+    steelMaterial({ color: STEEL_ALBEDO, repeat: [2, 1.35], ao: 0.55 }),
   )
   barrel.position.y = barrelY0
   group.add(barrel)
@@ -238,7 +251,7 @@ function buildBooster(): THREE.Group {
   // 熱分離段：略微外擴的短段 + 一圈排氣開口。V3 起這一段不拋離。
   const hotStage = new THREE.Mesh(
     bodySection(R * 1.0, R * 1.015, hotStageH),
-    steelMaterial({ color: 0x8f959d, repeat: [2, 0.3], roughnessScale: 1.25 }),
+    steelMaterial({ color: 0xc9cdd2, repeat: [2, 0.3], roughnessScale: 1.25 }),
   )
   hotStage.position.y = barrelY1
   group.add(hotStage)
@@ -390,15 +403,24 @@ function buildShip(): { group: THREE.Group } {
   const barrelY1 = H - noseH
   const barrelH = barrelY1 - barrelY0
 
-  const skinMat = track(steelMaterial({ color: 0xb4bbc3, repeat: [2, 1.0], ao: 0.55 }))
-  const noseMat = track(steelMaterial({ color: 0xbcc3cb, repeat: [2, 0.55], normalScale: 0.4 }))
+  const skinMat = track(steelMaterial({ color: STEEL_ALBEDO, repeat: [2, 1.0], ao: 0.55 }))
+  const noseMat = track(steelMaterial({ color: 0xe9ecef, repeat: [2, 0.55], normalScale: 0.4 }))
   const tileSkin = track(tileMaterial([2.6, 4.5]))
   const tileNose = track(tileMaterial([2.6, 1.7]))
   const flapMat = track(tileMaterial([1.1, 0.8]))
 
   const skirt = new THREE.Mesh(
     bodySection(R * 1.01, R * 1.006, skirtH),
-    track(steelMaterial({ color: 0x959ca4, repeat: [2, 0.3], normalScale: 0.8, ao: 0.9 })),
+    track(
+      steelMaterial({
+        color: 0x3a3e43,
+        repeat: [2, 0.3],
+        normalScale: 0.8,
+        ao: 0.9,
+        roughnessScale: 1.6,
+        metalness: 0.7,
+      }),
+    ),
   )
   group.add(skirt)
   group.add(bayPlate(R * 0.99, skirtH * 0.4))
