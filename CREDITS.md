@@ -53,7 +53,19 @@ Booster 上不再拋離、3 片 T 字配置的格柵翼、前襟翼移到更偏�
 上升與 Booster 返場時間軸取自 Starship Flight 6（2024-11-19）公開任務時間軸，
 Max-Q 時間參照 Flight 8 轉播時間表；Ship 再入段對齊 Flight 6 的 Ship 濺落時序，
 結尾的 Ship 接塔為 Flight 14 預定剖面（截至 2026-08，真實飛行尚未實施）。
-高度與速度為對齊關鍵點的擬合曲線，不是真實遙測資料，也不是物理模擬。
+Booster 返場的量級（apogee 約 90 km、下靶場 >60 km、回推後滑行）依 SpaceX 對
+Flight 7 的公開說明。高度與速度為對齊關鍵點的擬合曲線，下靶場距離由速度與
+路徑角推得——不是真實遙測資料，也不是物理模擬。
+
+## 視覺參考
+
+建模與材質比對用的參考照片（僅供比對，未放進專案）：
+
+- *Full Stack starship.jpg*，Jenny Hautmann，CC BY-SA 4.0，Wikimedia Commons——
+  Booster 7 / Ship 24 在 OLM 上，2023-04-16。用來校不鏽鋼的反射結構、
+  引擎裙的暗度、塔架與 OLM 腿的量體
+- *Starship launch tower in Starbase.jpg*，Alexander Hatley，CC BY 2.0，
+  Wikimedia Commons——塔架桁架的斜撐配置
 
 ## 商標聲明
 
