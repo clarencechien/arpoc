@@ -6,8 +6,8 @@
  */
 
 import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { XREstimatedLight } from 'three/examples/jsm/webxr/XREstimatedLight.js'
+import { SkyEnvironment, SUN_DIRECTION } from './sky'
 import { buildRocket } from './rocket'
 import { buildPad } from './pad'
 import { makeDustRing, makePlume, makeSparks } from './effects'
@@ -28,6 +28,11 @@ function contactShadowTexture(): THREE.Texture {
   g.fillRect(0, 0, s, s)
   return new THREE.CanvasTexture(c)
 }
+
+/** 原本 RoomEnvironment 用 0.55；天空 env 本身有對比，可以開到正常亮度。 */
+const SKY_ENV_INTENSITY = 1.2
+/** 環境貼圖的基準傾角（rad），見 setEnvironment 的說明。 */
+const ENV_TILT_BASE = 0.28
 
 export interface World {
   scene: THREE.Scene
@@ -54,7 +59,7 @@ export function createWorld(): World {
   const studioLights = new THREE.Group()
   const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x2a2f36, 1.6)
   const key = new THREE.DirectionalLight(0xffffff, 2.2)
-  key.position.set(1.2, 2.4, 1.0)
+  key.position.copy(SUN_DIRECTION).multiplyScalar(2.8) // 與天空的太陽同方向
   const fill = new THREE.DirectionalLight(0x9fb4cc, 0.7)
   fill.position.set(-1.5, 0.8, -1.2)
   studioLights.add(hemi, key, fill)
@@ -190,6 +195,11 @@ export function createWorld(): World {
 
     pad.setChopsticks(f.chopsticks)
 
+    // 升空時讓反射的地平線跟著慢慢傾斜——鏡面上那條分界線動起來的瞬間
+    // 說服力很高，而且只是一個 Euler 分量，零成本。
+    const climb = Math.min(1, Math.max(f.booster.y, f.ship.y - BOOSTER_HEIGHT) / 1.2)
+    scene.environmentRotation.x = ENV_TILT_BASE - 0.5 * climb
+
     boosterPlume.setIntensity(f.boosterPlume)
     shipPlume.setIntensity(f.shipPlume)
     landingPlume.setIntensity(f.landingPlume)
@@ -286,17 +296,26 @@ export function createWorld(): World {
         scene.remove(xrLight)
         studioLights.visible = true
         if (studioEnv) {
+          // 還原成天空 env，不是 RoomEnvironment
           scene.environment = studioEnv
-          scene.environmentIntensity = 0.55
+          scene.environmentIntensity = SKY_ENV_INTENSITY
           studioEnv = null
         }
       })
     },
     setEnvironment(renderer: THREE.WebGLRenderer) {
-      // 不鏽鋼要有東西可以反射，否則 metalness 0.9 會變成一片死黑
+      // 金屬的長相由 environment 單獨決定（燈光對它幾乎沒貢獻），
+      // 所以這裡放的是「亮天空 / 暗地面 / 硬邊地平線 / 過曝太陽」，
+      // 不是攝影棚方盒。詳見 sky.ts。
       const pmrem = new THREE.PMREMGenerator(renderer)
-      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-      scene.environmentIntensity = 0.55
+      const sky = new SkyEnvironment()
+      scene.environment = pmrem.fromScene(sky, 0.03).texture
+      scene.environmentIntensity = SKY_ENV_INTENSITY
+      // y：轉到太陽側落在箭體正面偏側。
+      // x：基準先傾 0.28 rad——地平線變成一個斜的大圓，箭體一側映天、另一側映地，
+      // 就是真實照片上那種左右明暗帶。applyFlight 再隨高度疊加變化。
+      scene.environmentRotation.set(ENV_TILT_BASE, -0.6, 0)
+      sky.dispose()
       pmrem.dispose()
     },
   }

@@ -258,6 +258,7 @@ export function buildPad(): Pad {
     color: 0x3d4249,
     metalness: 0.02,
     roughness: 0.96,
+    envMapIntensity: 0.5, // 混凝土不該把天空整片吃進來
   })
 
   // 混凝土坪：加大到約 45 cm 直徑，整個發射場站在上面

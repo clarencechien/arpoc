@@ -288,7 +288,11 @@ export function tileMaterial(repeat: [number, number]): THREE.MeshStandardMateri
   return m
 }
 
-/** 引擎艙、格柵翼那類非外殼的深色結構件。 */
+/**
+ * 引擎艙、格柵翼、塔架那類非外殼的結構件。
+ * envMapIntensity 壓到 0.6：天空 env 是為不鏽鋼反射調的，直接全額打在這些
+ * 半霧面結構上會整片染藍；金屬外殼（steelMaterial）維持 1.0。
+ */
 export function structureMaterial(color = 0x6d747d, roughness = 0.55): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness })
+  return new THREE.MeshStandardMaterial({ color, metalness: 0.8, roughness, envMapIntensity: 0.6 })
 }
