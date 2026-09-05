@@ -92,6 +92,9 @@ export class App {
   private lastFrameMs = 0
   private lastPanelDraw = 0
 
+  /** scripts/inspect.mjs 固定機位時鎖住自動取景 */
+  private cameraLocked = false
+
   /** AR 幀率監看：滑動平均低於門檻持續一段時間就關陰影（僅 AR，明確標註的效能 fallback） */
   private fpsAvg = 60
   private lowFpsSince = 0
@@ -182,6 +185,7 @@ export class App {
       this.controls = c
     }
     this.controls.enabled = true
+    this.cameraLocked = false
     this.toStandby()
     this.setStatus('待機中。點擊火箭即可手動發射。', 'idle')
   }
@@ -414,9 +418,24 @@ export class App {
    * 火箭一升空就出畫，所以隨著高度把鏡頭往後拉、目標點往上抬，
    * 讓載具與錨定在發射台旁的遙測面板同時留在畫面裡。
    */
+  /**
+   * 固定機位（給 scripts/inspect.mjs 的 contact sheet 用）。
+   * 只在桌面模式有意義；設定後自動取景停用，直到下次進入場景。
+   */
+  debugView(pos: [number, number, number], target: [number, number, number], panel = true): void {
+    const c = this.controls
+    if (!c) return
+    this.cameraLocked = true
+    c.minDistance = 0.02 // 特寫機位比正常互動的最小距離近
+    c.target.set(target[0], target[1], target[2])
+    this.camera.position.set(pos[0], pos[1], pos[2])
+    c.update()
+    this.world.panel.setOpacity(panel ? 1 : 0)
+  }
+
   private frameVehicle(flight: FlightState, dt: number): void {
     const c = this.controls
-    if (!c || !c.enabled || this.renderer.xr.isPresenting) return
+    if (!c || !c.enabled || this.renderer.xr.isPresenting || this.cameraLocked) return
     // 主角依階段切換：上升＝堆疊、Booster 返場＝Booster、
     // 接塔後回到地面、Ship 再入＝Ship
     let subject: number

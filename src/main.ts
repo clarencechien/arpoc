@@ -19,6 +19,19 @@ const ui: UiRefs = {
 
 const app = new App($<HTMLCanvasElement>('gl'), ui)
 
+// 給 scripts/inspect.mjs 用的固定機位鉤子：把鏡頭放到指定位置並鎖住自動取景。
+// 對一般使用者無害；不放進 UI。
+declare global {
+  interface Window {
+    __orbital: {
+      view(px: number, py: number, pz: number, tx: number, ty: number, tz: number, panel?: boolean): void
+    }
+  }
+}
+window.__orbital = {
+  view: (px, py, pz, tx, ty, tz, panel = true) => app.debugView([px, py, pz], [tx, ty, tz], panel),
+}
+
 // ── 能力偵測與說明文字 ────────────────────────────────
 // 降級模式不是次等公民：iOS Safari 目前沒有 WebXR AR，
 // 不做降級等於一半使用者看到白畫面（handoff §3）。
